@@ -1,4 +1,13 @@
+from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field
+
+PERIOD_PATTERN = r"^\d{4}-(0[1-9]|1[0-2])$"
+
+
+def _current_year() -> int:
+    return datetime.now().year
 
 
 class LoginRequest(BaseModel):
@@ -6,6 +15,13 @@ class LoginRequest(BaseModel):
 
     username: str
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    """当前用户修改密码请求体。"""
+
+    old_password: str
+    new_password: str = Field(min_length=6, max_length=64)
 
 
 class TokenResponse(BaseModel):
@@ -23,6 +39,7 @@ class TemplateCreate(BaseModel):
     """新建模板请求体。snapshot 为 Univer 工作簿快照字典。"""
 
     name: str
+    year: int = Field(default_factory=_current_year)
     snapshot: dict = Field(default_factory=dict)
     row_label_cols: int = Field(default=0, ge=0)
     col_label_rows: int = Field(default=0, ge=0)
@@ -34,6 +51,7 @@ class TemplateUpdate(BaseModel):
     """更新模板请求体。"""
 
     name: str | None = None
+    year: int | None = None
     snapshot: dict | None = None
     row_label_cols: int | None = Field(default=None, ge=0)
     col_label_rows: int | None = Field(default=None, ge=0)
@@ -46,6 +64,7 @@ class TemplateRead(BaseModel):
 
     id: int
     name: str
+    year: int = 0
     row_label_cols: int = 0
     col_label_rows: int = 0
     content_rows: int = 0
@@ -57,6 +76,7 @@ class TemplateDetail(BaseModel):
 
     id: int
     name: str
+    year: int = 0
     snapshot: dict
     row_label_cols: int = 0
     col_label_rows: int = 0
@@ -64,17 +84,11 @@ class TemplateDetail(BaseModel):
     content_cols: int = 0
 
 
-class WorkspaceTemplateDetail(BaseModel):
-    """工作台模板详情：snapshot 为当前用户已保存的数据（若有）否则为模板原始快照。"""
+class TemplateDuplicate(BaseModel):
+    """复制模板到指定年份的请求体。"""
 
-    id: int
-    name: str
-    row_label_cols: int = 0
-    col_label_rows: int = 0
-    content_rows: int = 0
-    content_cols: int = 0
-    has_saved: bool = False
-    snapshot: dict
+    year: int
+    copy_bindings: bool = True
 
 
 class RoleTemplateBind(BaseModel):
@@ -96,8 +110,91 @@ class RoleCreate(BaseModel):
     name: str
 
 
-class WorkbookCreate(BaseModel):
-    """提交用户填报数据的请求体。"""
+# 填报状态：none 仅出现在“未填报”的场景，实际落库为 draft/submitted/approved/rejected。
+WorkbookStatus = Literal["draft", "submitted", "approved", "rejected"]
+
+
+class WorkspaceTemplateItem(BaseModel):
+    """工作台模板列表项：附带当前周期填报状态。"""
+
+    id: int
+    name: str
+    year: int
+    row_label_cols: int = 0
+    col_label_rows: int = 0
+    content_rows: int = 0
+    content_cols: int = 0
+    status: str = "none"
+    submit_at: datetime | None = None
+
+
+class WorkspaceTemplateDetail(BaseModel):
+    """工作台模板详情：snapshot 为当前部门该周期已保存的数据（若有）否则为模板原始快照。"""
+
+    id: int
+    name: str
+    year: int
+    row_label_cols: int = 0
+    col_label_rows: int = 0
+    content_rows: int = 0
+    content_cols: int = 0
+    status: str = "none"
+    submit_at: datetime | None = None
+    reject_reason: str | None = None
+    snapshot: dict
+
+
+class WorkbookSubmit(BaseModel):
+    """部门填报提交请求体。action=save 保存草稿，action=submit 提交。"""
 
     template_id: int
+    period: str = Field(pattern=PERIOD_PATTERN)
     snapshot: dict
+    action: Literal["save", "submit"] = "save"
+
+
+class AdminBindingStatus(BaseModel):
+    """管理员视角：部门 × 模板 × 周期 的填报状态（含未填报项）。"""
+
+    role_id: int
+    role_name: str
+    template_id: int
+    template_name: str
+    status: str = "none"
+    submit_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
+class AdminWorkbookRead(BaseModel):
+    """管理员视角：部门填报记录（仅已存在填报数据的记录）。"""
+
+    role_id: int
+    role_name: str
+    template_id: int
+    template_name: str
+    period: str
+    status: str
+    submit_at: datetime | None = None
+    updated_at: datetime | None = None
+    reject_reason: str | None = None
+
+
+class AdminWorkbookDetail(BaseModel):
+    """管理员视角：部门填报详情（含快照，用于预览）。"""
+
+    role_id: int
+    role_name: str
+    template_id: int
+    template_name: str
+    period: str
+    status: str
+    submit_at: datetime | None = None
+    reject_reason: str | None = None
+    snapshot: dict
+
+
+class WorkbookReview(BaseModel):
+    """管理员审核请求体。"""
+
+    action: Literal["approved", "rejected"]
+    reject_reason: str | None = None

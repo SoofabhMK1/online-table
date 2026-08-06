@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from sqlmodel import Field, Relationship, SQLModel
-from sqlalchemy import Column, JSON
+from sqlalchemy import Column, JSON, UniqueConstraint
 
 
 class Role(SQLModel, table=True):
@@ -16,6 +16,7 @@ class Role(SQLModel, table=True):
     template_links: list["RoleTemplateMapping"] = Relationship(
         back_populates="role"
     )
+    workbooks: list["RoleWorkbook"] = Relationship(back_populates="role")
 
 
 class User(SQLModel, table=True):
@@ -29,7 +30,6 @@ class User(SQLModel, table=True):
     role_id: int = Field(foreign_key="roles.id")
 
     role: Role | None = Relationship(back_populates="users")
-    workbooks: list["UserWorkbook"] = Relationship(back_populates="user")
 
 
 class Template(SQLModel, table=True):
@@ -39,6 +39,8 @@ class Template(SQLModel, table=True):
 
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(index=True)
+    # 填报年份：同一模板结构在不同年份可创建不同版本
+    year: int = Field(default=0, index=True)
     snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
     # 行标签列数：最左侧若干列作为行标签（例如第 1、2 列都是行标签 → row_label_cols=2）
     row_label_cols: int = Field(default=0)
@@ -52,7 +54,7 @@ class Template(SQLModel, table=True):
     role_links: list["RoleTemplateMapping"] = Relationship(
         back_populates="template"
     )
-    workbooks: list["UserWorkbook"] = Relationship(back_populates="template")
+    workbooks: list["RoleWorkbook"] = Relationship(back_populates="template")
 
 
 class RoleTemplateMapping(SQLModel, table=True):
@@ -71,16 +73,26 @@ class RoleTemplateMapping(SQLModel, table=True):
     template: Template = Relationship(back_populates="role_links")
 
 
-class UserWorkbook(SQLModel, table=True):
-    """用户填报数据表。snapshot 为用户修改后的完整快照字典。"""
+class RoleWorkbook(SQLModel, table=True):
+    """部门（角色）填报数据表，一个部门对每个模板每个周期一行。
 
-    __tablename__ = "user_workbooks"
+    - period 为填报周期，形如 "YYYY-MM"（例如 2026-08），同一模板每月独立保存。
+    - status：draft(草稿) / submitted(已提交) / approved(已通过) / rejected(已退回)。
+    """
+
+    __tablename__ = "role_workbooks"
+    __table_args__ = (UniqueConstraint("role_id", "template_id", "period"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    user_id: int = Field(foreign_key="users.id")
-    template_id: int = Field(foreign_key="templates.id")
+    role_id: int = Field(foreign_key="roles.id", index=True)
+    template_id: int = Field(foreign_key="templates.id", index=True)
+    period: str = Field(index=True)
     snapshot: dict = Field(default_factory=dict, sa_column=Column(JSON))
+    status: str = Field(default="draft", index=True)
+    submit_at: datetime | None = None
+    review_at: datetime | None = None
+    reject_reason: str | None = None
     updated_at: datetime = Field(default_factory=datetime.utcnow)
 
-    user: User = Relationship(back_populates="workbooks")
+    role: Role = Relationship(back_populates="workbooks")
     template: Template = Relationship(back_populates="workbooks")

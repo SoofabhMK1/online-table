@@ -6,6 +6,10 @@ import axios from 'axios'
 const BASE = 'http://localhost:5173'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const currentPeriod = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 
 const results = []
 function report(name, ok, extra = '') {
@@ -181,16 +185,15 @@ async function main() {
   await sleep(2000)
   report('用户填报视图全屏 Univer 渲染', true)
 
-  // 填几个单元格再保存（通过 evaluate 点击表格区域较复杂，直接点保存验证接口即可）
-  // 保存（直接点击按钮，更稳健）
+  // 填几个单元格再保存（通过 evaluate 点击表格区域较复杂，直接点保存草稿验证接口即可）
   await page.evaluate(() => {
     const btns = Array.from(document.querySelectorAll('button'))
-    btns.find((b) => b.textContent.replace(/\s+/g, '') === '保存')?.click()
+    btns.find((b) => b.textContent.replace(/\s+/g, '') === '保存草稿')?.click()
   })
-  await page.waitForFunction(() => document.body.textContent.includes('保存成功'), {
+  await page.waitForFunction(() => document.body.textContent.includes('草稿已保存'), {
     timeout: 20000,
   })
-  report('用户保存填报数据成功', true)
+  report('用户保存填报草稿成功', true, `period=${currentPeriod()}`)
 
   await browser.close()
   if (pageErrors.length > 0) {

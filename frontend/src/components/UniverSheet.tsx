@@ -45,6 +45,8 @@ interface UniverSheetProps {
   initialSnapshot?: IWorkbookData
   /** 标签保护配置；提供后，标签区单元格对当前用户只读（供用户填报场景使用）。 */
   protectedLabels?: ProtectedLabels
+  /** 整表只读：拦截所有单元格写入（用于已提交/已通过后的只读展示与管理员预览）。 */
+  readOnly?: boolean
   /** Univer 实例就绪回调。 */
   onReady?: () => void
 }
@@ -77,7 +79,7 @@ function createBlankWorkbookData(): IWorkbookData {
  * - 通过 useImperativeHandle 向上级暴露 getWorkbookData()。
  */
 const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
-  function UniverSheet({ initialSnapshot, protectedLabels, onReady }, ref) {
+  function UniverSheet({ initialSnapshot, protectedLabels, readOnly, onReady }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     const univerRef = useRef<Univer | null>(null)
     const apiRef = useRef<FUniver | null>(null)
@@ -126,14 +128,26 @@ const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
       // 内容区与标签保护：仅内容区（矩形）可编辑，其余全部只读。
       // 内容区 = 行 [colLabelRows, colLabelRows+contentRows) × 列 [rowLabelCols, rowLabelCols+contentCols)
       // 若未配置内容区尺寸（contentRows/Cols 均为 0），则退化为仅锁定标签区。
+      // readOnly 模式下整表只读（已提交/已通过后展示，或管理员只读预览）。
       const disposables: Array<() => void> = []
-      if (protectedLabels && (protectedLabels.rowLabelCols > 0 || protectedLabels.colLabelRows > 0)) {
-        const { rowLabelCols, colLabelRows, contentRows, contentCols } = protectedLabels
+      if (
+        readOnly ||
+        (protectedLabels && (protectedLabels.rowLabelCols > 0 || protectedLabels.colLabelRows > 0))
+      ) {
+        const { rowLabelCols, colLabelRows, contentRows, contentCols } = protectedLabels ?? {
+          rowLabelCols: 0,
+          colLabelRows: 0,
+          contentRows: 0,
+          contentCols: 0,
+        }
         const hasContentArea = contentRows > 0 && contentCols > 0
         const interceptorService = univer.__getInjector().get(SheetInterceptorService)
         const disposable = interceptorService.writeCellInterceptor.intercept(VALIDATE_CELL, {
           priority: 99,
           handler: (value, context) => {
+            if (readOnly) {
+              return Promise.resolve(false)
+            }
             const { row, col } = context
             let editable: boolean
             if (hasContentArea) {

@@ -6,6 +6,10 @@ import axios from 'axios'
 const BASE = 'http://localhost:5173'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const currentPeriod = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 const results = []
 const report = (n, ok, x = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  ' + x : ''}`) }
 
@@ -33,8 +37,13 @@ async function main() {
   const opH = { Authorization: `Bearer ${opLogin.data.access_token}` }
   const filledSnapshot = JSON.parse(JSON.stringify(snapshot))
   filledSnapshot.sheets.s1.cellData['1']['1'] = { v: '123' } // B2
-  await axios.post(`${BASE}/api/workspace/workbooks`, { template_id: tid, snapshot: filledSnapshot }, { headers: opH })
-  report('POST 保存填报数据', true)
+  await axios.post(`${BASE}/api/workspace/workbooks`, {
+    template_id: tid,
+    period: currentPeriod(),
+    snapshot: filledSnapshot,
+    action: 'save',
+  }, { headers: opH })
+  report('POST 保存填报数据', true, `period=${currentPeriod()}`)
 
   // 浏览器：用户打开填报视图，拦截模板详情接口（现返回用户已保存数据）
   const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, args: ['--no-sandbox'] })

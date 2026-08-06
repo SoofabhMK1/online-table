@@ -1,7 +1,16 @@
-import { useCallback, useEffect, useRef, useState, type Key } from 'react'
+import {
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  type Key,
+} from 'react'
 import {
   Button,
   Card,
+  Checkbox,
+  DatePicker,
   Form,
   Input,
   InputNumber,
@@ -13,20 +22,24 @@ import {
   Spin,
   Table,
   Tabs,
+  Tag,
   Transfer,
   Typography,
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
+  CopyOutlined,
   DeleteOutlined,
   PlusOutlined,
+  ReloadOutlined,
   SaveOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { IWorkbookData } from '@univerjs/core'
 import UniverSheet, { type UniverSheetHandle } from '../../components/UniverSheet'
+import ChangePasswordModal from '../../components/ChangePasswordModal'
 import { detectLabels } from '../../utils/detectLabels'
 import { useAuthStore } from '../../store/useAuthStore'
 import {
@@ -34,23 +47,45 @@ import {
   createRole,
   createTemplate,
   deleteRole,
+  duplicateTemplate,
+  fetchAdminWorkbookDetail,
+  fetchFillingOverview,
   fetchRoleTemplates,
   fetchRoles,
   fetchTemplateDetail,
   fetchTemplates,
   resetRolePassword,
+  reviewWorkbook,
   updateTemplate,
 } from '../../api/admin'
-import type { RoleItem, TemplateItem } from '../../api/types'
+import type {
+  AdminBindingStatus,
+  AdminWorkbookDetail,
+  RoleItem,
+  TemplateItem,
+} from '../../api/types'
+import {
+  currentPeriod,
+  dayjsToPeriod,
+  periodToDayjs,
+  STATUS_META,
+  STATUS_ORDER,
+} from '../../utils/workbookStatus'
 
 const { Header, Content } = Layout
 
 interface TemplateFormValues {
   name: string
+  year: number
   rowLabelCols: number
   colLabelRows: number
   contentRows: number
   contentCols: number
+}
+
+interface OverviewRoleRow {
+  id: number
+  name: string
 }
 
 export default function AdminPage() {
@@ -71,12 +106,37 @@ export default function AdminPage() {
   const sheetRef = useRef<UniverSheetHandle>(null)
   const [form] = Form.useForm<TemplateFormValues>()
 
+  // 复制模板
+  const [duplicateOpen, setDuplicateOpen] = useState(false)
+  const [duplicateTargetId, setDuplicateTargetId] = useState<number | null>(null)
+  const [duplicateYear, setDuplicateYear] = useState(new Date().getFullYear() + 1)
+  const [duplicateCopyBindings, setDuplicateCopyBindings] = useState(true)
+  const [duplicating, setDuplicating] = useState(false)
+
   // 权限配置
   const [roles, setRoles] = useState<RoleItem[]>([])
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [targetKeys, setTargetKeys] = useState<Key[]>([])
   const [permissionLoading, setPermissionLoading] = useState(false)
   const [newRoleName, setNewRoleName] = useState('')
+
+  // 修改密码
+  const [changePwdOpen, setChangePwdOpen] = useState(false)
+
+  // 填报总览
+  const [overviewPeriod, setOverviewPeriod] = useState<string>(currentPeriod())
+  const [overview, setOverview] = useState<AdminBindingStatus[]>([])
+  const [overviewLoading, setOverviewLoading] = useState(false)
+  const [previewOpen, setPreviewOpen] = useState(false)
+  const [previewMounted, setPreviewMounted] = useState(false)
+  const [previewCell, setPreviewCell] = useState<AdminBindingStatus | null>(null)
+  const [previewDetail, setPreviewDetail] = useState<AdminWorkbookDetail | null>(null)
+  const [previewSnapshot, setPreviewSnapshot] = useState<
+    IWorkbookData | undefined
+  >(undefined)
+  const [reviewing, setReviewing] = useState(false)
+  const [rejectOpen, setRejectOpen] = useState(false)
+  const [rejectReason, setRejectReason] = useState('')
 
   const loadTemplates = useCallback(async () => {
     setTemplateLoading(true)
@@ -110,6 +170,76 @@ export default function AdminPage() {
       .finally(() => setPermissionLoading(false))
   }, [selectedRoleId])
 
+  const loadOverview = useCallback(async (period: string) => {
+    setOverviewLoading(true)
+    try {
+      setOverview(await fetchFillingOverview(period))
+    } catch {
+      message.error('加载填报总览失败')
+    } finally {
+      setOverviewLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadOverview(overviewPeriod)
+  }, [loadOverview, overviewPeriod])
+
+  const overviewRoles = useMemo<OverviewRoleRow[]>(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => map.set(o.role_id, o.role_name))
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+  }, [overview])
+
+  const overviewTemplates = useMemo(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => map.set(o.template_id, o.template_name))
+    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+  }, [overview])
+
+  const openPreview = async (cell: AdminBindingStatus) => {
+    if (cell.status === 'none') {
+      return
+    }
+    try {
+      const detail = await fetchAdminWorkbookDetail(
+        cell.role_id,
+        cell.template_id,
+        overviewPeriod,
+      )
+      setPreviewCell(cell)
+      setPreviewDetail(detail)
+      setPreviewSnapshot(detail.snapshot as unknown as IWorkbookData)
+      setPreviewOpen(true)
+    } catch {
+      message.error('加载填报数据失败')
+    }
+  }
+
+  const handleReview = async (action: 'approved' | 'rejected', reason?: string) => {
+    if (!previewCell) {
+      return
+    }
+    setReviewing(true)
+    try {
+      await reviewWorkbook(previewCell.role_id, previewCell.template_id, overviewPeriod, {
+        action,
+        reject_reason: action === 'rejected' ? reason : undefined,
+      })
+      message.success(action === 'approved' ? '已审核通过' : '已退回')
+      setRejectOpen(false)
+      setPreviewOpen(false)
+      await loadOverview(overviewPeriod)
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      )?.response?.data?.detail
+      message.error(detail ?? '审核失败，请重试')
+    } finally {
+      setReviewing(false)
+    }
+  }
+
   const handleLogout = () => {
     logout()
     message.success('已退出登录')
@@ -121,6 +251,7 @@ export default function AdminPage() {
     setInitialSnapshot(undefined)
     form.setFieldsValue({
       name: '',
+      year: new Date().getFullYear(),
       rowLabelCols: 0,
       colLabelRows: 0,
       contentRows: 0,
@@ -136,6 +267,7 @@ export default function AdminPage() {
       setInitialSnapshot(detail.snapshot as unknown as IWorkbookData)
       form.setFieldsValue({
         name: detail.name,
+        year: detail.year,
         rowLabelCols: detail.row_label_cols,
         colLabelRows: detail.col_label_rows,
         contentRows: detail.content_rows,
@@ -185,6 +317,7 @@ export default function AdminPage() {
       if (editingId === null) {
         await createTemplate(
           values.name,
+          values.year,
           snapshot as unknown as Record<string, unknown>,
           labels,
         )
@@ -193,6 +326,7 @@ export default function AdminPage() {
         await updateTemplate(
           editingId,
           values.name,
+          values.year,
           snapshot as unknown as Record<string, unknown>,
           labels,
         )
@@ -204,6 +338,33 @@ export default function AdminPage() {
       message.error('保存失败，请重试')
     } finally {
       setSaving(false)
+    }
+  }
+
+  const openDuplicate = (template: TemplateItem) => {
+    setDuplicateTargetId(template.id)
+    setDuplicateYear(new Date().getFullYear() + 1)
+    setDuplicateCopyBindings(true)
+    setDuplicateOpen(true)
+  }
+
+  const handleDuplicate = async () => {
+    if (duplicateTargetId == null) {
+      return
+    }
+    setDuplicating(true)
+    try {
+      const detail = await duplicateTemplate(duplicateTargetId, {
+        year: duplicateYear,
+        copy_bindings: duplicateCopyBindings,
+      })
+      message.success(`已复制为「${detail.name}」`)
+      setDuplicateOpen(false)
+      await loadTemplates()
+    } catch {
+      message.error('复制模板失败，请重试')
+    } finally {
+      setDuplicating(false)
     }
   }
 
@@ -260,21 +421,32 @@ export default function AdminPage() {
   }
 
   const columns: TableColumnsType<TemplateItem> = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
+    { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '模板名称', dataIndex: 'name' },
+    { title: '年份', dataIndex: 'year', width: 80 },
     {
       title: '标签区',
-      width: 200,
+      width: 180,
       render: (_, record) =>
         `${record.row_label_cols}列 × ${record.col_label_rows}行`,
     },
     {
       title: '操作',
-      width: 120,
+      width: 160,
       render: (_, record) => (
-        <Button type="link" size="small" onClick={() => openEdit(record)}>
-          编辑
-        </Button>
+        <Space>
+          <Button type="link" size="small" onClick={() => openEdit(record)}>
+            编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<CopyOutlined />}
+            onClick={() => openDuplicate(record)}
+          >
+            复制
+          </Button>
+        </Space>
       ),
     },
   ]
@@ -312,6 +484,73 @@ export default function AdminPage() {
       ),
     },
   ]
+
+  const overviewColumns: TableColumnsType<OverviewRoleRow> = useMemo(
+    () => [
+      { title: '部门', dataIndex: 'name', fixed: 'left', width: 120 },
+      ...overviewTemplates.map((t) => ({
+        title: t.name,
+        key: t.id,
+        width: 150,
+        render: (_: unknown, record: OverviewRoleRow) => {
+          const cell = overview.find(
+            (o) => o.role_id === record.id && o.template_id === t.id,
+          )
+          if (!cell) {
+            return '-'
+          }
+          const meta = STATUS_META[cell.status]
+          return (
+            <Tag
+              color={meta.color}
+              style={{ cursor: 'pointer', width: '100%', textAlign: 'center', marginInlineEnd: 0 }}
+              onClick={() => openPreview(cell)}
+            >
+              {meta.text}
+            </Tag>
+          )
+        },
+      })),
+    ],
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [overview, overviewTemplates],
+  )
+
+  const overviewPanel = (
+    <Space orientation="vertical" style={{ width: '100%' }} size="large">
+      <Space wrap>
+        <Typography.Text strong>月度填报总览</Typography.Text>
+        <DatePicker
+          picker="month"
+          value={periodToDayjs(overviewPeriod)}
+          onChange={(v) => setOverviewPeriod(dayjsToPeriod(v))}
+          allowClear={false}
+          style={{ width: 140 }}
+        />
+        <Button icon={<ReloadOutlined />} onClick={() => loadOverview(overviewPeriod)}>
+          刷新
+        </Button>
+      </Space>
+      <Space wrap>
+        <Typography.Text type="secondary">图例：</Typography.Text>
+        {STATUS_ORDER.map((s) => (
+          <Tag key={s} color={STATUS_META[s].color}>
+            {STATUS_META[s].text}
+          </Tag>
+        ))}
+        <Typography.Text type="secondary">点击单元格可预览/审核</Typography.Text>
+      </Space>
+      <Table
+        rowKey="id"
+        columns={overviewColumns}
+        dataSource={overviewRoles}
+        loading={overviewLoading}
+        pagination={false}
+        size="small"
+        scroll={{ x: 'max-content' }}
+      />
+    </Space>
+  )
 
   const templatePanel = (
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
@@ -366,7 +605,10 @@ export default function AdminPage() {
           </Space>
           <Spin spinning={permissionLoading}>
             <Transfer
-              dataSource={templates.map((t) => ({ key: String(t.id), title: t.name }))}
+              dataSource={templates.map((t) => ({
+                key: String(t.id),
+                title: `${t.name}（${t.year}）`,
+              }))}
               targetKeys={targetKeys}
               onChange={(keys) => setTargetKeys(keys)}
               render={(item) => item.title}
@@ -404,6 +646,7 @@ export default function AdminPage() {
           <Typography.Text style={{ color: '#fff' }}>
             当前用户：{username ?? ''}
           </Typography.Text>
+          <Button onClick={() => setChangePwdOpen(true)}>修改密码</Button>
           <Button onClick={handleLogout}>退出登录</Button>
         </Space>
       </Header>
@@ -412,9 +655,121 @@ export default function AdminPage() {
           items={[
             { key: 'templates', label: '模板管理', children: templatePanel },
             { key: 'permissions', label: '角色与权限', children: permissionPanel },
+            { key: 'overview', label: '填报总览', children: overviewPanel },
           ]}
         />
       </Content>
+
+      <ChangePasswordModal
+        open={changePwdOpen}
+        onClose={() => setChangePwdOpen(false)}
+      />
+
+      <Modal
+        title={
+          previewDetail
+            ? `${previewDetail.role_name} · ${previewDetail.template_name} · ${previewDetail.period}`
+            : '填报预览'
+        }
+        open={previewOpen}
+        onCancel={() => setPreviewOpen(false)}
+        afterOpenChange={(open) => setPreviewMounted(open)}
+        width={1000}
+        forceRender
+        footer={
+          previewDetail?.status === 'submitted'
+            ? [
+                <Button key="close" onClick={() => setPreviewOpen(false)}>
+                  关闭
+                </Button>,
+                <Button
+                  key="reject"
+                  danger
+                  loading={reviewing}
+                  onClick={() => setRejectOpen(true)}
+                >
+                  退回
+                </Button>,
+                <Button
+                  key="approve"
+                  type="primary"
+                  loading={reviewing}
+                  onClick={() => handleReview('approved')}
+                >
+                  审核通过
+                </Button>,
+              ]
+            : [
+                <Button key="close" onClick={() => setPreviewOpen(false)}>
+                  关闭
+                </Button>,
+              ]
+        }
+      >
+        {previewDetail?.status === 'rejected' && previewDetail.reject_reason && (
+          <Typography.Paragraph type="danger">
+            退回原因：{previewDetail.reject_reason}
+          </Typography.Paragraph>
+        )}
+        <div style={{ height: '60vh' }}>
+          {previewMounted && (
+            <UniverSheet initialSnapshot={previewSnapshot} readOnly />
+          )}
+        </div>
+      </Modal>
+
+      <Modal
+        title="退回填报"
+        open={rejectOpen}
+        onCancel={() => setRejectOpen(false)}
+        onOk={() => handleReview('rejected', rejectReason)}
+        confirmLoading={reviewing}
+        okText="确认退回"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+      >
+        <Typography.Paragraph type="secondary">
+          请填写退回原因，部门将据此修改后重新提交。
+        </Typography.Paragraph>
+        <Input.TextArea
+          rows={3}
+          value={rejectReason}
+          onChange={(e) => setRejectReason(e.target.value)}
+          placeholder="例如：预算金额格式不正确，请核对后重新提交"
+        />
+      </Modal>
+
+      <Modal
+        title="复制模板"
+        open={duplicateOpen}
+        onCancel={() => setDuplicateOpen(false)}
+        onOk={handleDuplicate}
+        confirmLoading={duplicating}
+        okText="复制"
+        cancelText="取消"
+      >
+        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
+          <Space>
+            <Typography.Text>目标年份：</Typography.Text>
+            <InputNumber
+              min={2000}
+              max={2100}
+              value={duplicateYear}
+              onChange={(v) => setDuplicateYear(v ?? new Date().getFullYear() + 1)}
+              style={{ width: 120 }}
+            />
+          </Space>
+          <Checkbox
+            checked={duplicateCopyBindings}
+            onChange={(e) => setDuplicateCopyBindings(e.target.checked)}
+          >
+            同时复制到角色的模板绑定（新模板直接对所有已绑定部门可见）
+          </Checkbox>
+          <Typography.Text type="secondary">
+            将复制当前模板的结构与内容区配置到指定年份，可用于「不同年份不同模板」的跨年复用。
+          </Typography.Text>
+        </Space>
+      </Modal>
 
       <Modal
         title={editingId === null ? '新建模板' : '编辑模板'}
@@ -438,13 +793,23 @@ export default function AdminPage() {
         ]}
       >
         <Form form={form} layout="vertical">
-          <Form.Item
-            name="name"
-            label="模板名称"
-            rules={[{ required: true, message: '请输入模板名称' }]}
-          >
-            <Input placeholder="例如：费用报销表" />
-          </Form.Item>
+          <Space align="end" wrap>
+            <Form.Item
+              name="name"
+              label="模板名称"
+              rules={[{ required: true, message: '请输入模板名称' }]}
+            >
+              <Input placeholder="例如：费用报销表" style={{ width: 240 }} />
+            </Form.Item>
+            <Form.Item
+              name="year"
+              label="填报年份"
+              tooltip="不同年份可使用不同的模板；部门在填报时只会看到该年份的模板。"
+              rules={[{ required: true, message: '请输入年份' }]}
+            >
+              <InputNumber min={2000} max={2100} style={{ width: 110 }} />
+            </Form.Item>
+          </Space>
           <Space align="end" wrap>
             <Form.Item
               name="rowLabelCols"

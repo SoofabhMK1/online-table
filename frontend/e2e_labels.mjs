@@ -6,6 +6,10 @@ import axios from 'axios'
 const BASE = 'http://localhost:5173'
 const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
+const currentPeriod = () => {
+  const d = new Date()
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+}
 const results = []
 
 function report(name, ok, extra = '') {
@@ -148,17 +152,13 @@ async function main() {
   await sleep(400)
   await page2.keyboard.press('Enter')
   await sleep(800)
-  const a1Val = await page2.evaluate(() => {
-    // 通过表单栏判断：读取 DOM 中公式栏内容不准确，改用 API 查询后的快照对比
-    return 'check-later'
-  })
   // 改为：保存后检查快照 A1 是否仍是"项目"
   await page2.evaluate(() => {
     const btns = Array.from(document.querySelectorAll('button'))
-    btns.find((b) => b.textContent.replace(/\s+/g, '') === '保存')?.click()
+    btns.find((b) => b.textContent.replace(/\s+/g, '') === '保存草稿')?.click()
   })
   await sleep(2000)
-  const saved = (await axios.get(`${BASE}/api/workspace/templates/${tid}`, {
+  const saved = (await axios.get(`${BASE}/api/workspace/templates/${tid}?period=${currentPeriod()}`, {
     headers: { Authorization: `Bearer ${(await axios.post(`${BASE}/api/auth/login`, { username: 'op1', password: 'pw123' })).data.access_token}` },
   })).data
   const wb = saved.snapshot

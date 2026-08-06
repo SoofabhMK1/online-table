@@ -6,8 +6,10 @@
 
 一个带有基于角色的访问控制（RBAC）的在线表格 Web 应用。核心业务：
 
-- **管理员** 在线绘制 Excel 模板（Univer 表格），为模板配置「行标签 / 列标签 / 内容区」结构，并将模板分配给特定角色。
-- **普通用户**（按角色）登录后，仅能看到自己角色被授权的模板；进入填报视图后，**只能编辑内容区**，标签区与内容区外的单元格一律只读；填报数据按用户独立保存。
+- **管理员** 在线绘制 Excel 模板（Univer 表格），为模板配置「行标签 / 列标签 / 内容区」结构、指定**填报年份**，并将模板分配给特定角色（部门）。模板支持一键复制到新年份（跨年不同模板，可同时复制角色绑定）。
+- **普通用户**（按角色）登录后，在工作台选择**填报月份**，仅能看到本部门在该年份被授权的模板；进入填报视图后，**只能编辑内容区**，标签区与内容区外的单元格一律只读。
+- **填报周期**：`role_workbooks` 以「部门(角色) + 模板 + 周期(YYYY-MM)」为唯一键，同一模板每月独立保存一份，互不覆盖。
+- **提交/审核流程**：填报状态为 草稿(draft) → 已提交(submitted) → 已通过(approved)/已退回(rejected)。提交后锁定编辑；管理员在「填报总览」矩阵中预览并审核，退回需填写原因，部门可修改后重新提交。
 - **角色** 由管理员创建，创建时自动生成默认账号（用户名=角色名，统一初始密码），管理员可一键重置角色密码。
 
 ## 技术栈
@@ -37,8 +39,8 @@ backend/
 ├── seed_demo.py             # 幂等创建演示角色「运营部」+ 默认账号 + op1
 └── app/
     ├── config.py            # Settings：SECRET_KEY、DATABASE_URL、ADMIN_ROLE_NAME、DEFAULT_USER_PASSWORD
-    ├── database.py          # SQLite engine、create_db_and_tables、轻量迁移、get_session
-    ├── models.py            # 5 张 SQLModel 数据表
+    ├── database.py          # SQLite engine、create_db_and_tables、轻量迁移（含 user_workbooks→role_workbooks 归并）、get_session
+    ├── models.py            # 5 张 SQLModel 数据表（role_workbooks 支持周期与状态）
     ├── schemas.py           # Pydantic 请求/响应模型
     ├── security.py          # bcrypt 哈希、JWT 编解码
     ├── dependencies.py      # get_current_user、get_current_admin
@@ -61,14 +63,17 @@ frontend/
     │   └── types.ts         # 前后端共享的接口类型（snake_case 对应后端字段）
     ├── store/useAuthStore.ts# token/userId/username/roleId/roleName，persist
     ├── components/
-    │   ├── UniverSheet.tsx  # 核心表格组件（见下文）
+    │   ├── UniverSheet.tsx  # 核心表格组件（见下文，支持 readOnly）
+    │   ├── ChangePasswordModal.tsx  # 用户自助修改密码弹窗
     │   ├── univerLocales.ts # 聚合各 Univer 包的 zh-CN 语言包
     │   ├── ProtectedRoute.tsx / AdminRoute.tsx / RootRedirect.tsx
     ├── pages/
     │   ├── LoginPage.tsx
-    │   ├── admin/AdminPage.tsx      # 模板管理 + 角色与权限
-    │   └── workspace/WorkspacePage.tsx / WorkspaceEditPage.tsx
-    └── utils/detectLabels.ts # 自动识别行/列标签与内容区尺寸
+    │   ├── admin/AdminPage.tsx      # 模板管理(含跨年复制) + 角色与权限 + 填报总览矩阵/审核
+    │   └── workspace/WorkspacePage.tsx(月份选择+状态) / WorkspaceEditPage.tsx(草稿/提交)
+    └── utils/
+        ├── detectLabels.ts   # 自动识别行/列标签与内容区尺寸
+        └── workbookStatus.ts # 填报状态文案/颜色 + 周期(YYYY-MM) 工具函数
 ```
 
 ## 数据库模型（`backend/app/models.py`）
@@ -77,17 +82,20 @@ frontend/
 
 - **roles**: `id`, `name`(unique)
 - **users**: `id`, `username`(unique), `password_hash`, `role_id`→roles.id
-- **templates**: `id`, `name`, `snapshot`(JSON), `row_label_cols`, `col_label_rows`, `content_rows`, `content_cols`, `created_at`
+- **templates**: `id`, `name`, `year`(填报年份), `snapshot`(JSON), `row_label_cols`, `col_label_rows`, `content_rows`, `content_cols`, `created_at`
   - 标签/内容区语义：左侧 `row_label_cols` 列为行标签；上方 `col_label_rows` 行为列标签；**内容区 = 行 `[col_label_rows, +content_rows)` × 列 `[row_label_cols, +content_cols)`**
 - **role_template_mapping**: 组合主键 `(role_id, template_id)`
-- **user_workbooks**: `id`, `user_id`, `template_id`, `snapshot`(JSON), `updated_at` —— 每个用户对每个模板一行（存在即更新）
+- **role_workbooks**: `id`, `role_id`, `template_id`, `period`("YYYY-MM"), `snapshot`(JSON), `status`, `submit_at`, `review_at`, `reject_reason`, `updated_at`
+  - 唯一约束 `(role_id, template_id, period)`；**整个部门（角色）共享一份填报数据**
+  - `status`：`draft`(草稿) / `submitted`(已提交) / `approved`(已通过) / `rejected`(已退回)
 
-> 迁移：`database._migrate_templates_columns()` 在启动时对已存在的 templates 表 `ALTER TABLE ADD COLUMN` 补齐标签/内容区字段（幂等）。
+> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表（均幂等）。
 
 ## RESTful API（全部前缀 `/api`）
 
 - **认证**
   - `POST /auth/login` {username, password} → `{access_token, user_id, username, role_id, role_name}`
+  - `POST /auth/change-password` {old_password, new_password} → 当前登录用户修改自己的密码（需登录）
 - **管理员**（需 `get_current_admin`，即角色名为「管理员」）
   - `GET /admin/roles` → 角色列表（**不含管理员角色**）
   - `POST /admin/roles` {name} → 创建角色 + 自动创建默认账号（用户名=角色名，密码=DEFAULT_USER_PASSWORD）
@@ -95,23 +103,29 @@ frontend/
   - `DELETE /admin/roles/{id}` → 删除角色（管理员角色不可删；角色下存在其他用户时拒绝）
   - `GET /admin/roles/{id}/templates` → 该角色已绑定模板 id 列表
   - `POST /admin/roles/{id}/templates` {template_ids} → 全量覆盖绑定
-  - `POST /templates` {name, snapshot, row_label_cols, col_label_rows, content_rows, content_cols}
+  - `GET /admin/overview?period=YYYY-MM` → 填报总览：该年份所有 部门×模板 绑定及周期状态（含未填报）
+  - `GET /admin/workbooks?period=YYYY-MM&status=` → 指定周期各部门填报记录（可按状态筛选）
+  - `GET /admin/workbooks/{role_id}/{template_id}/{period}` → 某部门某周期已填写的快照（管理员预览）
+  - `POST /admin/workbooks/{role_id}/{template_id}/{period}/review` {action: approved|rejected, reject_reason?} → 审核（仅对 submitted 生效，退回需填原因）
+  - `POST /templates` {name, year, snapshot, row_label_cols, col_label_rows, content_rows, content_cols}
   - `GET /templates` / `GET /templates/{id}` / `PUT /templates/{id}`
+  - `POST /templates/{id}/duplicate` {year, copy_bindings} → 复制模板（快照+标签）到指定年份，可同步复制角色绑定（跨年建模板）
 - **用户工作台**（需登录）
-  - `GET /workspace/templates` → 按当前用户 role_id 联查可访问模板（id+name）
-  - `GET /workspace/templates/{id}` → 模板详情；**snapshot 优先返回该用户已保存的填报数据**（`has_saved` 标记），否则返回模板原始快照
-  - `POST /workspace/workbooks` {template_id, snapshot} → 保存/更新填报数据
+  - `GET /workspace/templates?period=YYYY-MM` → 当前部门在该年份可访问模板列表 + 该周期填报状态（none/draft/submitted/approved/rejected）
+  - `GET /workspace/templates/{id}?period=YYYY-MM` → 模板详情；**snapshot 优先返回该部门该周期已保存的填报数据**，否则返回模板原始快照
+  - `POST /workspace/workbooks` {template_id, period, snapshot, action: save|submit} → 保存草稿或提交；**submitted/approved 后禁止修改**，rejected 可改后重提
 - 健康检查：`GET /api/health`
 
 ## 核心组件：`UniverSheet.tsx`
 
 封装 Univer 表格编辑器的通用组件，通过 `useImperativeHandle` 暴露 `getWorkbookData()`。
 
-- **Props**：`initialSnapshot?: IWorkbookData`、`protectedLabels?: ProtectedLabels`、`onReady?`
+- **Props**：`initialSnapshot?: IWorkbookData`、`protectedLabels?: ProtectedLabels`、`readOnly?: boolean`、`onReady?`
 - **装配**：用官方 `UniverSheetsCorePreset({ container })` 预设注册插件（render/docs/sheets/sheets-ui/formula-ui 等），需同时导入 `@univerjs/preset-sheets-core/lib/index.css` 及各组件 CSS。中文语言包由 `buildLocales()` 聚合（Univer 0.25 必须显式传 `locales`，否则抛 `Locale not initialized`）。
 - **初始化**：`useEffect` 内 `new Univer()` → 注册 preset → `createUnit(UNIVER_SHEET, snapshot)`。
 - **标签保护**：当传入 `protectedLabels` 时，注册 `SheetInterceptorService.writeCellInterceptor.intercept(VALIDATE_CELL, ...)` 拦截器。拦截器对**内容矩形之外**的单元格返回 `Promise.resolve(false)`（阻止写入），内容区内放行。
   - 若 `contentRows/contentCols` 均为 0（未配置内容区），退化为「仅锁定标签区」。
+  - `readOnly` 为 true 时整表只读（所有单元格拦截为 false），用于已提交/已通过后的只读展示与管理员预览。**只读状态切换通过更换 UniverSheet 的 `key` 重新挂载实现**（拦截器在 mount 时注册）。
 
 ## 关键架构决策与坑（务必阅读）
 

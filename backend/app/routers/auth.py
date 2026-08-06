@@ -2,9 +2,10 @@ from fastapi import APIRouter, Depends, HTTPException, status
 from sqlmodel import Session, select
 
 from app.database import get_session
+from app.dependencies import get_current_user
 from app.models import Role, User
-from app.schemas import LoginRequest, TokenResponse
-from app.security import create_access_token, verify_password
+from app.schemas import ChangePasswordRequest, LoginRequest, TokenResponse
+from app.security import create_access_token, hash_password, verify_password
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -29,3 +30,20 @@ async def login(body: LoginRequest, session: Session = Depends(get_session)) -> 
         role_id=user.role_id,
         role_name=role.name,
     )
+
+
+@router.post("/change-password", response_model=dict)
+async def change_password(
+    body: ChangePasswordRequest,
+    current_user: User = Depends(get_current_user),
+    session: Session = Depends(get_session),
+) -> dict:
+    """当前登录用户修改自己的密码。"""
+    if not verify_password(body.old_password, current_user.password_hash):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail="原密码错误"
+        )
+    current_user.password_hash = hash_password(body.new_password)
+    session.add(current_user)
+    session.commit()
+    return {"message": "密码修改成功"}
