@@ -1,0 +1,1 @@
+export const ADMIN_ROLE_NAME = '管理员'
