@@ -24,7 +24,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import type { RoleCreateRequest, RoleItem } from '../../../api/types'
-import { useRoles } from '../hooks/useRoles'
+import { useRolesStore } from '../../../store/useRolesStore'
 
 interface RoleFormValues {
   name: string
@@ -35,16 +35,14 @@ interface RoleFormValues {
 }
 
 export default function RolePanel() {
-  const {
-    roles,
-    orgTree,
-    orgLoading,
-    reloadOrgTree,
-    create,
-    update,
-    remove,
-    resetPassword,
-  } = useRoles()
+  const roles = useRolesStore((s) => s.roles)
+  const orgTree = useRolesStore((s) => s.orgTree)
+  const orgLoading = useRolesStore((s) => s.orgLoading)
+  const fetchOrgTree = useRolesStore((s) => s.fetchOrgTree)
+  const create = useRolesStore((s) => s.create)
+  const update = useRolesStore((s) => s.update)
+  const remove = useRolesStore((s) => s.remove)
+  const resetPassword = useRolesStore((s) => s.resetPassword)
 
   const [roleModalOpen, setRoleModalOpen] = useState(false)
   const [editingRole, setEditingRole] = useState<RoleItem | null>(null)
@@ -59,9 +57,9 @@ export default function RolePanel() {
   // 打开弹窗前预加载组织架构
   useEffect(() => {
     if (roleModalOpen) {
-      void reloadOrgTree()
+      void fetchOrgTree()
     }
-  }, [roleModalOpen, reloadOrgTree])
+  }, [roleModalOpen, fetchOrgTree])
 
   const roleEntityOptions = useMemo(
     () =>

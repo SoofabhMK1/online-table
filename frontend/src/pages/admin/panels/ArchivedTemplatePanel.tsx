@@ -7,10 +7,13 @@ import { Button, Space, Table, Typography, message } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { ReloadOutlined, UndoOutlined } from '@ant-design/icons'
 import type { TemplateItem } from '../../../api/types'
-import { useTemplates } from '../hooks/useTemplates'
+import { useTemplatesStore } from '../../../store/useTemplatesStore'
 
 export default function ArchivedTemplatePanel() {
-  const { archivedTemplates, archivedLoading, reloadArchived, unarchive } = useTemplates()
+  const archivedTemplates = useTemplatesStore((s) => s.archivedTemplates)
+  const archivedLoading = useTemplatesStore((s) => s.archivedLoading)
+  const fetchArchived = useTemplatesStore((s) => s.fetchArchived)
+  const unarchive = useTemplatesStore((s) => s.unarchive)
   const [archivingId, setArchivingId] = useState<number | null>(null)
 
   const handleUnarchiveTemplate = async (template: TemplateItem) => {
@@ -56,7 +59,7 @@ export default function ArchivedTemplatePanel() {
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
       <Space wrap>
         <Typography.Text strong>归档模板</Typography.Text>
-        <Button icon={<ReloadOutlined />} onClick={() => void reloadArchived()}>
+        <Button icon={<ReloadOutlined />} onClick={() => void fetchArchived()}>
           刷新
         </Button>
         <Typography.Text type="secondary">

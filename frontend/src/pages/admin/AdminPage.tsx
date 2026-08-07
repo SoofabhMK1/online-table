@@ -6,13 +6,14 @@
  *   3) AccountSettingsModal 全局挂载
  *   4) OrgManager + 其它 panel
  */
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button, Layout, Space, Tabs, Typography, message } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import AccountSettingsModal from '../../components/AccountSettingsModal'
 import OrgManager from '../../components/OrgManager'
-import { useRoles } from './hooks/useRoles'
+import { useRolesStore } from '../../store/useRolesStore'
+import { useTemplatesStore } from '../../store/useTemplatesStore'
 import TemplatePanel from './panels/TemplatePanel'
 import ArchivedTemplatePanel from './panels/ArchivedTemplatePanel'
 import RolePanel from './panels/RolePanel'
@@ -30,8 +31,19 @@ export default function AdminPage() {
 
   const [changePwdOpen, setChangePwdOpen] = useState(false)
 
-  // 组织架构由 RolePanel 间接拉取；这里复用 hook 让 OrgManager 可直接显示
-  const { orgTree, orgLoading, reloadOrgTree } = useRoles()
+  // 组织架构 / 模板 / 角色 / 归档 — 共享 store
+  const orgTree = useRolesStore((s) => s.orgTree)
+  const orgLoading = useRolesStore((s) => s.orgLoading)
+  const fetchOrgTree = useRolesStore((s) => s.fetchOrgTree)
+  const fetchRoles = useRolesStore((s) => s.fetchRoles)
+  const fetchTemplatesAll = useTemplatesStore((s) => s.fetchAll)
+
+  // 进入页面时拉取初始数据（覆盖式写入 store）
+  useEffect(() => {
+    void fetchRoles()
+    void fetchOrgTree()
+    void fetchTemplatesAll()
+  }, [fetchRoles, fetchOrgTree, fetchTemplatesAll])
 
   const handleLogout = () => {
     logout()
@@ -70,7 +82,7 @@ export default function AdminPage() {
               children: (
                 <OrgManager
                   tree={orgTree}
-                  onChanged={() => void reloadOrgTree()}
+                  onChanged={() => void fetchOrgTree()}
                   loading={orgLoading}
                 />
               ),

@@ -42,7 +42,7 @@ import type { TemplateItem } from '../../../api/types'
 import { snapshotToXlsx, xlsxToSnapshot } from '../../../utils/excelBridge'
 import { computeUsedRange, type UsedRange } from '../../../utils/usedRange'
 import { formatCell, formatRange, parseCellRef } from '../../../utils/cellRef'
-import { useTemplates } from '../hooks/useTemplates'
+import { useTemplatesStore } from '../../../store/useTemplatesStore'
 
 interface TemplateFormValues {
   name: string
@@ -87,7 +87,10 @@ function deriveLabels(
 }
 
 export default function TemplatePanel() {
-  const { templates, loading, reloadActive, archive } = useTemplates()
+  const templates = useTemplatesStore((s) => s.templates)
+  const loading = useTemplatesStore((s) => s.loading)
+  const fetchActive = useTemplatesStore((s) => s.fetchActive)
+  const archive = useTemplatesStore((s) => s.archive)
   const [archivingId, setArchivingId] = useState<number | null>(null)
   const [exportingId, setExportingId] = useState<number | null>(null)
 
@@ -208,35 +211,37 @@ export default function TemplatePanel() {
   }
 
   const handleSaveTemplate = async () => {
-    const values = await form.validateFields()
-    const snapshot = sheetRef.current?.getWorkbookData()
-    if (!snapshot) {
-      return
-    }
-    const start = parseCellRef(dataStartCell)
-    if (!start) {
-      message.error('请输入数据区域起始单元格，格式如 B3（大小写均可）')
-      return
-    }
-    const used = computeUsedRange(snapshot)
-    const derived = deriveLabels(start, used)
-    if (!derived) {
-      return
-    }
-    const labels: TemplateLabelConfig = {
-      rowLabelCols: derived.rowLabelCols,
-      colLabelRows: derived.colLabelRows,
-      contentRows: derived.contentRows,
-      contentCols: derived.contentCols,
-      contentNumeric: values.contentNumeric ?? false,
-    }
-    if (labels.contentRows <= 0 || labels.contentCols <= 0) {
-      message.warning(
-        '数据区域为空（起始单元格超出使用区域），用户将无法填写任何单元格，请确认',
-      )
-    }
     setSaving(true)
     try {
+      const values = await form.validateFields()
+      const snapshot = sheetRef.current?.getWorkbookData()
+      if (!snapshot) {
+        message.error('未获取到表格内容，请稍候再试')
+        return
+      }
+      const start = parseCellRef(dataStartCell)
+      if (!start) {
+        message.error('请输入数据区域起始单元格，格式如 B3（大小写均可）')
+        return
+      }
+      const used = computeUsedRange(snapshot)
+      const derived = deriveLabels(start, used)
+      if (!derived) {
+        message.error('无法推算标签区与内容区，请检查起始单元格')
+        return
+      }
+      const labels: TemplateLabelConfig = {
+        rowLabelCols: derived.rowLabelCols,
+        colLabelRows: derived.colLabelRows,
+        contentRows: derived.contentRows,
+        contentCols: derived.contentCols,
+        contentNumeric: values.contentNumeric ?? false,
+      }
+      if (labels.contentRows <= 0 || labels.contentCols <= 0) {
+        message.warning(
+          '数据区域为空（起始单元格超出使用区域），用户将无法填写任何单元格，请确认',
+        )
+      }
       if (editingId === null) {
         await createTemplate(
           values.name,
@@ -256,9 +261,12 @@ export default function TemplatePanel() {
         message.success('模板已更新')
       }
       setModalOpen(false)
-      await reloadActive()
-    } catch {
-      message.error('保存失败，请重试')
+      await fetchActive()
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      )?.response?.data?.detail
+      message.error(detail ?? '保存失败，请重试')
     } finally {
       setSaving(false)
     }
@@ -288,7 +296,7 @@ export default function TemplatePanel() {
       })
       message.success(`已复制为「${detail.name}」`)
       setDuplicateOpen(false)
-      await reloadActive()
+      await fetchActive()
     } catch {
       message.error('复制模板失败，请重试')
     } finally {
