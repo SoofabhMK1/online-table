@@ -18,7 +18,7 @@ function isNumeric(value: unknown): boolean {
     if (!stripped) {
       return true
     }
-    return !Number.isNaN(Number(stripped.replace(/,/g, '')))
+    return /^-?\d{1,3}(,\d{3})+(\.\d+)?$|^-?\d+(\.\d+)?$/.test(stripped)
   }
   return false
 }
