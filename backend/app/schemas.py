@@ -106,15 +106,96 @@ class RoleTemplateBind(BaseModel):
 
 
 class RoleRead(BaseModel):
-    """角色响应。"""
+    """角色响应（含组织分类名称）。"""
+
+    id: int
+    name: str
+    segment_id: int | None = None
+    segment_name: str | None = None
+    entity_id: int | None = None
+    entity_name: str | None = None
+    department_id: int | None = None
+    department_name: str | None = None
+    function_tag_id: int | None = None
+    function_tag_name: str | None = None
+
+
+class RoleCreate(BaseModel):
+    """新建角色请求体。分类可选；提供 department_id 时会自动补全其所属 entity/segment。"""
+
+    name: str
+    segment_id: int | None = None
+    entity_id: int | None = None
+    department_id: int | None = None
+    function_tag_id: int | None = None
+
+
+class RoleUpdate(BaseModel):
+    """编辑角色请求体。"""
+
+    name: str | None = None
+    segment_id: int | None = None
+    entity_id: int | None = None
+    department_id: int | None = None
+    function_tag_id: int | None = None
+
+
+class OrgDepartmentRead(BaseModel):
+    """部门。"""
 
     id: int
     name: str
 
 
-class RoleCreate(BaseModel):
-    """新建角色请求体。"""
+class OrgEntityRead(BaseModel):
+    """主体（含其部门）。"""
 
+    id: int
+    name: str
+    departments: list[OrgDepartmentRead] = []
+
+
+class OrgSegmentRead(BaseModel):
+    """业务板块（含其主体）。"""
+
+    id: int
+    name: str
+    entities: list[OrgEntityRead] = []
+
+
+class FunctionTagRead(BaseModel):
+    """职能标签。"""
+
+    id: int
+    name: str
+
+
+class OrgTreeRead(BaseModel):
+    """组织架构全量树 + 职能标签。"""
+
+    segments: list[OrgSegmentRead] = []
+    tags: list[FunctionTagRead] = []
+
+
+class OrgSegmentCreate(BaseModel):
+    name: str
+
+
+class OrgEntityCreate(BaseModel):
+    name: str
+    segment_id: int
+
+
+class OrgDepartmentCreate(BaseModel):
+    name: str
+    entity_id: int
+
+
+class FunctionTagCreate(BaseModel):
+    name: str
+
+
+class OrgRename(BaseModel):
     name: str
 
 

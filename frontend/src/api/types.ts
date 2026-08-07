@@ -42,6 +42,49 @@ export interface TemplateDuplicateRequest {
 export interface RoleItem {
   id: number
   name: string
+  segment_id: number | null
+  segment_name: string | null
+  entity_id: number | null
+  entity_name: string | null
+  department_id: number | null
+  department_name: string | null
+  function_tag_id: number | null
+  function_tag_name: string | null
+}
+
+export interface RoleCreateRequest {
+  name: string
+  segment_id?: number | null
+  entity_id?: number | null
+  department_id?: number | null
+  function_tag_id?: number | null
+}
+
+export interface OrgDepartmentItem {
+  id: number
+  name: string
+}
+
+export interface OrgEntityItem {
+  id: number
+  name: string
+  departments: OrgDepartmentItem[]
+}
+
+export interface OrgSegmentItem {
+  id: number
+  name: string
+  entities: OrgEntityItem[]
+}
+
+export interface FunctionTagItem {
+  id: number
+  name: string
+}
+
+export interface OrgTree {
+  segments: OrgSegmentItem[]
+  tags: FunctionTagItem[]
 }
 
 export type WorkbookStatus = 'none' | 'draft' | 'submitted' | 'approved' | 'rejected'

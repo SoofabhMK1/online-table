@@ -46,6 +46,7 @@ import { useNavigate } from 'react-router-dom'
 import type { IWorkbookData } from '@univerjs/core'
 import UniverSheet, { type UniverSheetHandle } from '../../components/UniverSheet'
 import ChangePasswordModal from '../../components/ChangePasswordModal'
+import OrgManager from '../../components/OrgManager'
 import { parseCellRef, formatCell, formatRange } from '../../utils/cellRef'
 import { computeUsedRange, type UsedRange } from '../../utils/usedRange'
 import { snapshotToXlsx, xlsxToSnapshot } from '../../utils/excelBridge'
@@ -59,6 +60,7 @@ import {
   duplicateTemplate,
   fetchAdminWorkbookDetail,
   fetchFillingOverview,
+  fetchOrgTree,
   fetchPeriods,
   fetchRoleTemplates,
   fetchRoles,
@@ -67,6 +69,7 @@ import {
   resetRolePassword,
   reviewWorkbook,
   unarchiveTemplate,
+  updateRole,
   updateTemplate,
   upsertPeriod,
 } from '../../api/admin'
@@ -74,6 +77,7 @@ import type {
   AdminBindingStatus,
   AdminWorkbookDetail,
   FillingPeriodItem,
+  OrgTree,
   RoleItem,
   TemplateItem,
   WorkbookStatus,
@@ -92,6 +96,14 @@ interface TemplateFormValues {
   name: string
   year: number
   contentNumeric: boolean
+}
+
+interface RoleFormValues {
+  name: string
+  segmentId?: number
+  entityId?: number
+  departmentId?: number
+  tagId?: number
 }
 
 /** 根据数据区域起始单元格与使用区域，推算行标签/列标签/内容区。 */
@@ -160,7 +172,29 @@ export default function AdminPage() {
   const [selectedRoleId, setSelectedRoleId] = useState<number | null>(null)
   const [targetKeys, setTargetKeys] = useState<Key[]>([])
   const [permissionLoading, setPermissionLoading] = useState(false)
-  const [newRoleName, setNewRoleName] = useState('')
+  const [orgTree, setOrgTree] = useState<OrgTree>({ segments: [], tags: [] })
+  const [orgLoading, setOrgLoading] = useState(false)
+  const [roleModalOpen, setRoleModalOpen] = useState(false)
+  const [editingRole, setEditingRole] = useState<RoleItem | null>(null)
+  const [savingRole, setSavingRole] = useState(false)
+  const [roleForm] = Form.useForm<RoleFormValues>()
+  const watchedSegmentId = Form.useWatch('segmentId', roleForm)
+  const watchedEntityId = Form.useWatch('entityId', roleForm)
+  const roleEntityOptions = useMemo(
+    () =>
+      orgTree.segments
+        .find((s) => s.id === watchedSegmentId)
+        ?.entities.map((e) => ({ value: e.id, label: e.name })) ?? [],
+    [orgTree, watchedSegmentId],
+  )
+  const roleDepartmentOptions = useMemo(
+    () =>
+      orgTree.segments
+        .find((s) => s.id === watchedSegmentId)
+        ?.entities.find((e) => e.id === watchedEntityId)
+        ?.departments.map((d) => ({ value: d.id, label: d.name })) ?? [],
+    [orgTree, watchedSegmentId, watchedEntityId],
+  )
 
   // 修改密码
   const [changePwdOpen, setChangePwdOpen] = useState(false)
@@ -230,6 +264,21 @@ export default function AdminPage() {
       }
     })
   }, [])
+
+  const loadOrgTree = useCallback(async () => {
+    setOrgLoading(true)
+    try {
+      setOrgTree(await fetchOrgTree())
+    } catch {
+      message.error('加载组织架构失败')
+    } finally {
+      setOrgLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadOrgTree()
+  }, [loadOrgTree])
 
   useEffect(() => {
     if (selectedRoleId == null) {
@@ -569,18 +618,62 @@ export default function AdminPage() {
     }
   }
 
-  const handleCreateRole = async () => {
-    const name = newRoleName.trim()
-    if (!name) {
-      return
+  const openCreateRole = async () => {
+    await loadOrgTree()
+    setEditingRole(null)
+    roleForm.resetFields()
+    setRoleModalOpen(true)
+  }
+
+  const openEditRole = async (role: RoleItem) => {
+    await loadOrgTree()
+    setEditingRole(role)
+    roleForm.setFieldsValue({
+      name: role.name,
+      segmentId: role.segment_id ?? undefined,
+      entityId: role.entity_id ?? undefined,
+      departmentId: role.department_id ?? undefined,
+      tagId: role.function_tag_id ?? undefined,
+    })
+    setRoleModalOpen(true)
+  }
+
+  const handleRoleFormChange = (changed: Partial<RoleFormValues>) => {
+    if ('segmentId' in changed) {
+      roleForm.setFieldsValue({ entityId: undefined, departmentId: undefined })
     }
+    if ('entityId' in changed) {
+      roleForm.setFieldsValue({ departmentId: undefined })
+    }
+  }
+
+  const handleRoleModalOk = async () => {
+    const values = await roleForm.validateFields()
+    const payload = {
+      name: values.name,
+      segment_id: values.segmentId,
+      entity_id: values.entityId,
+      department_id: values.departmentId,
+      function_tag_id: values.tagId,
+    }
+    setSavingRole(true)
     try {
-      await createRole(name)
-      message.success('角色创建成功')
-      setNewRoleName('')
+      if (editingRole) {
+        await updateRole(editingRole.id, payload)
+        message.success('角色已更新')
+      } else {
+        await createRole(payload)
+        message.success('角色创建成功')
+      }
+      setRoleModalOpen(false)
       setRoles(await fetchRoles())
-    } catch {
-      message.error('角色创建失败（可能已存在同名角色）')
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      )?.response?.data?.detail
+      message.error(detail ?? '保存失败')
+    } finally {
+      setSavingRole(false)
     }
   }
 
@@ -704,18 +797,38 @@ export default function AdminPage() {
   ]
 
   const roleColumns: TableColumnsType<RoleItem> = [
-    { title: 'ID', dataIndex: 'id', width: 80 },
-    { title: '角色名称', dataIndex: 'name' },
+    { title: 'ID', dataIndex: 'id', width: 60 },
+    { title: '角色名称', dataIndex: 'name', width: 140 },
+    {
+      title: '所属分类',
+      render: (_, record) => {
+        if (!record.segment_name) {
+          return <Typography.Text type="secondary">未分类</Typography.Text>
+        }
+        return [record.segment_name, record.entity_name, record.department_name]
+          .filter(Boolean)
+          .join(' / ')
+      },
+    },
+    {
+      title: '职能',
+      dataIndex: 'function_tag_name',
+      width: 110,
+      render: (value: string | null) => (value ? <Tag color="blue">{value}</Tag> : '-'),
+    },
     {
       title: '默认账号',
-      width: 200,
+      width: 170,
       render: (_, record) => `${record.name} / 初始密码 123456`,
     },
     {
       title: '操作',
-      width: 200,
+      width: 240,
       render: (_, record) => (
-        <Space>
+        <Space size={0} wrap>
+          <Button type="link" size="small" onClick={() => openEditRole(record)}>
+            编辑
+          </Button>
           <Popconfirm
             title="确认将账号密码重置为初始密码 123456？"
             onConfirm={() => handleResetPassword(record.id)}
@@ -954,16 +1067,12 @@ export default function AdminPage() {
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
       <Card title="角色管理" size="small">
         <Space style={{ marginBottom: 16 }}>
-          <Input
-            placeholder="新角色名称，例如：财务部"
-            value={newRoleName}
-            onChange={(e) => setNewRoleName(e.target.value)}
-            onPressEnter={handleCreateRole}
-            style={{ width: 240 }}
-          />
-          <Button type="primary" icon={<PlusOutlined />} onClick={handleCreateRole}>
+          <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
             新增角色
           </Button>
+          <Typography.Text type="secondary">
+            一个部门下可创建多个角色；创建时需选择 业务板块 / 主体 / 部门 与 职能标签。
+          </Typography.Text>
         </Space>
         <Table
           rowKey="id"
@@ -1042,6 +1151,7 @@ export default function AdminPage() {
           items={[
             { key: 'templates', label: '模板管理', children: templatePanel },
             { key: 'roles', label: '角色管理', children: rolePanel },
+            { key: 'org', label: '组织架构', children: <OrgManager tree={orgTree} onChanged={loadOrgTree} loading={orgLoading} /> },
             { key: 'permissions', label: '模板权限', children: bindingPanel },
             { key: 'overview', label: '填报总览', children: overviewPanel },
             { key: 'periods', label: '填报期间', children: periodPanel },
@@ -1054,6 +1164,74 @@ export default function AdminPage() {
         open={changePwdOpen}
         onClose={() => setChangePwdOpen(false)}
       />
+
+      <Modal
+        title={editingRole ? '编辑角色' : '新增角色'}
+        open={roleModalOpen}
+        onCancel={() => setRoleModalOpen(false)}
+        onOk={handleRoleModalOk}
+        confirmLoading={savingRole}
+        okText="保存"
+        cancelText="取消"
+        destroyOnHidden
+        width={520}
+      >
+        <Form
+          form={roleForm}
+          layout="vertical"
+          onValuesChange={handleRoleFormChange}
+        >
+          <Form.Item
+            name="name"
+            label="角色名称"
+            rules={[{ required: true, message: '请输入角色名称' }]}
+          >
+            <Input placeholder="例如：预算编制" />
+          </Form.Item>
+          <Form.Item
+            name="segmentId"
+            label="业务板块"
+            rules={[{ required: true, message: '请选择业务板块' }]}
+          >
+            <Select
+              placeholder="请选择业务板块"
+              options={orgTree.segments.map((s) => ({ value: s.id, label: s.name }))}
+            />
+          </Form.Item>
+          <Form.Item
+            name="entityId"
+            label="主体"
+            rules={[{ required: true, message: '请选择主体' }]}
+          >
+            <Select
+              placeholder="请选择主体"
+              options={roleEntityOptions}
+              disabled={watchedSegmentId == null}
+            />
+          </Form.Item>
+          <Form.Item
+            name="departmentId"
+            label="部门"
+            rules={[{ required: true, message: '请选择部门' }]}
+          >
+            <Select
+              placeholder="请选择部门"
+              options={roleDepartmentOptions}
+              disabled={watchedEntityId == null}
+            />
+          </Form.Item>
+          <Form.Item
+            name="tagId"
+            label="职能标签"
+            rules={[{ required: true, message: '请选择职能标签' }]}
+          >
+            <Select
+              placeholder="请选择职能标签"
+              options={orgTree.tags.map((t) => ({ value: t.id, label: t.name }))}
+            />
+          </Form.Item>
+        </Form>
+      </Modal>
 
       <Modal
         title={

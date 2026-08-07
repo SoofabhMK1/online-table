@@ -4,6 +4,12 @@ import type {
   AdminWorkbookDetail,
   AdminWorkbookItem,
   FillingPeriodItem,
+  FunctionTagItem,
+  OrgDepartmentItem,
+  OrgEntityItem,
+  OrgSegmentItem,
+  OrgTree,
+  RoleCreateRequest,
   RoleItem,
   TemplateDetail,
   TemplateDuplicateRequest,
@@ -15,8 +21,15 @@ export async function fetchRoles(): Promise<RoleItem[]> {
   return get<RoleItem[]>('/admin/roles')
 }
 
-export async function createRole(name: string): Promise<RoleItem> {
-  return post<RoleItem>('/admin/roles', { name })
+export async function createRole(payload: RoleCreateRequest): Promise<RoleItem> {
+  return post<RoleItem>('/admin/roles', payload)
+}
+
+export async function updateRole(
+  roleId: number,
+  payload: RoleCreateRequest,
+): Promise<RoleItem> {
+  return put<RoleItem>(`/admin/roles/${roleId}`, payload)
 }
 
 export async function deleteRole(roleId: number): Promise<void> {
@@ -155,4 +168,71 @@ export async function upsertPeriod(
   locked: boolean,
 ): Promise<FillingPeriodItem> {
   return put<FillingPeriodItem>(`/admin/periods/${period}`, { locked })
+}
+
+// ---------- 组织架构 ----------
+
+export async function fetchOrgTree(): Promise<OrgTree> {
+  return get<OrgTree>('/admin/org')
+}
+
+export async function createOrgSegment(name: string): Promise<OrgSegmentItem> {
+  return post<OrgSegmentItem>('/admin/org/segments', { name })
+}
+export async function renameOrgSegment(
+  id: number,
+  name: string,
+): Promise<OrgSegmentItem> {
+  return put<OrgSegmentItem>(`/admin/org/segments/${id}`, { name })
+}
+export async function deleteOrgSegment(id: number): Promise<void> {
+  return del(`/admin/org/segments/${id}`)
+}
+
+export async function createOrgEntity(
+  name: string,
+  segmentId: number,
+): Promise<OrgEntityItem> {
+  return post<OrgEntityItem>('/admin/org/entities', { name, segment_id: segmentId })
+}
+export async function renameOrgEntity(
+  id: number,
+  name: string,
+): Promise<OrgEntityItem> {
+  return put<OrgEntityItem>(`/admin/org/entities/${id}`, { name })
+}
+export async function deleteOrgEntity(id: number): Promise<void> {
+  return del(`/admin/org/entities/${id}`)
+}
+
+export async function createOrgDepartment(
+  name: string,
+  entityId: number,
+): Promise<OrgDepartmentItem> {
+  return post<OrgDepartmentItem>('/admin/org/departments', {
+    name,
+    entity_id: entityId,
+  })
+}
+export async function renameOrgDepartment(
+  id: number,
+  name: string,
+): Promise<OrgDepartmentItem> {
+  return put<OrgDepartmentItem>(`/admin/org/departments/${id}`, { name })
+}
+export async function deleteOrgDepartment(id: number): Promise<void> {
+  return del(`/admin/org/departments/${id}`)
+}
+
+export async function createOrgTag(name: string): Promise<FunctionTagItem> {
+  return post<FunctionTagItem>('/admin/org/tags', { name })
+}
+export async function renameOrgTag(
+  id: number,
+  name: string,
+): Promise<FunctionTagItem> {
+  return put<FunctionTagItem>(`/admin/org/tags/${id}`, { name })
+}
+export async function deleteOrgTag(id: number): Promise<void> {
+  return del(`/admin/org/tags/${id}`)
 }

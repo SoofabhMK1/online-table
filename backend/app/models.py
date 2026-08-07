@@ -4,19 +4,81 @@ from sqlmodel import Field, Relationship, SQLModel
 from sqlalchemy import Column, JSON, UniqueConstraint
 
 
+class BusinessSegment(SQLModel, table=True):
+    """业务板块（组织架构第一层）。"""
+
+    __tablename__ = "business_segments"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+
+    entities: list["OrgEntity"] = Relationship(back_populates="segment")
+
+
+class OrgEntity(SQLModel, table=True):
+    """主体（组织架构第二层，隶属于业务板块）。"""
+
+    __tablename__ = "org_entities"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    segment_id: int = Field(foreign_key="business_segments.id", index=True)
+
+    segment: BusinessSegment = Relationship(back_populates="entities")
+    departments: list["OrgDepartment"] = Relationship(back_populates="entity")
+
+
+class OrgDepartment(SQLModel, table=True):
+    """部门（组织架构第三层，隶属于主体）。一个部门下可有多个角色。"""
+
+    __tablename__ = "org_departments"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str
+    entity_id: int = Field(foreign_key="org_entities.id", index=True)
+
+    entity: OrgEntity = Relationship(back_populates="departments")
+    roles: list["Role"] = Relationship(back_populates="department")
+
+
+class FunctionTag(SQLModel, table=True):
+    """职能标签（全局列表，如 行政科室、预算等）。"""
+
+    __tablename__ = "function_tags"
+
+    id: int | None = Field(default=None, primary_key=True)
+    name: str = Field(unique=True, index=True)
+
+
 class Role(SQLModel, table=True):
-    """角色表。"""
+    """角色表。角色按 业务板块→主体→部门 + 职能标签 分类，分类为组织元数据（可空）。"""
 
     __tablename__ = "roles"
 
     id: int | None = Field(default=None, primary_key=True)
     name: str = Field(unique=True, index=True)
+    segment_id: int | None = Field(
+        default=None, foreign_key="business_segments.id", index=True
+    )
+    entity_id: int | None = Field(
+        default=None, foreign_key="org_entities.id", index=True
+    )
+    department_id: int | None = Field(
+        default=None, foreign_key="org_departments.id", index=True
+    )
+    function_tag_id: int | None = Field(
+        default=None, foreign_key="function_tags.id", index=True
+    )
 
     users: list["User"] = Relationship(back_populates="role")
     template_links: list["RoleTemplateMapping"] = Relationship(
         back_populates="role"
     )
     workbooks: list["RoleWorkbook"] = Relationship(back_populates="role")
+    segment: BusinessSegment | None = Relationship()
+    entity: OrgEntity | None = Relationship()
+    department: OrgDepartment | None = Relationship(back_populates="roles")
+    function_tag: FunctionTag | None = Relationship()
 
 
 class User(SQLModel, table=True):

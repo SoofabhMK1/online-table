@@ -12,7 +12,8 @@
 - **提交/审核流程**：填报状态为 草稿(draft) → 已提交(submitted) → 已通过(approved)/已退回(rejected)。提交后锁定编辑；管理员在「填报总览」矩阵中预览并审核，退回需填写原因，部门可修改后重新提交。
 - **填报期间锁定**：管理员在「填报期间」Tab 手动锁定/解锁某月（`filling_periods`），锁定后该月所有部门不可再保存/提交（无自动截止时间）。
 - **内容区数字校验**：模板可选「内容区仅允许数字」（`content_numeric`），提交时非空单元格必须为数值，否则返回非法单元格坐标（如「B2 需为数字」）。
-- **角色** 由管理员创建，创建时自动生成默认账号（用户名=角色名，统一初始密码），管理员可一键重置角色密码。
+- **角色分类**：角色按「业务板块 → 主体 → 部门 + 职能标签」分类（在「组织架构」Tab 统一配置三层与全局职能标签）；「角色管理」Tab 通过弹窗**级联选择**分类并填写角色名（一个部门可建多个角色），分类为组织元数据、填报仍按角色独立。
+- **角色** 由管理员创建，创建时自动生成默认账号（用户名=角色名，统一初始密码），管理员可一键重置密码。
 
 ## 技术栈
 
@@ -67,11 +68,12 @@ frontend/
     ├── components/
     │   ├── UniverSheet.tsx  # 核心表格组件（见下文，支持 readOnly）
     │   ├── ChangePasswordModal.tsx  # 用户自助修改密码弹窗
+    │   ├── OrgManager.tsx   # 组织架构管理（板块→主体→部门 + 职能标签）
     │   ├── univerLocales.ts # 聚合各 Univer 包的 zh-CN 语言包
     │   ├── ProtectedRoute.tsx / AdminRoute.tsx / RootRedirect.tsx
     ├── pages/
     │   ├── LoginPage.tsx
-    │   ├── admin/AdminPage.tsx      # 模板管理(导入/导出/跨年复制/归档) + 角色与权限 + 填报总览矩阵/审核/导出 + 填报期间 + 归档模板
+    │   ├── admin/AdminPage.tsx      # 模板管理(导入/导出/复制/归档) + 角色管理(弹窗级联创建/编辑) + 组织架构 + 模板权限 + 填报总览(汇总筛选/审核/导出) + 填报期间 + 归档模板
     │   └── workspace/WorkspacePage.tsx(月份选择+状态) / WorkspaceEditPage.tsx(草稿/提交)
     └── utils/
         ├── cellRef.ts            # Excel 单元格引用解析/格式化（A1、B3 等）
@@ -85,7 +87,8 @@ frontend/
 
 5 张表，snapshot 均以 SQLAlchemy `Column(JSON)` 存 SQLite（自动序列化，**禁止二次 json.dumps**）。
 
-- **roles**: `id`, `name`(unique)
+- **roles**: `id`, `name`(unique), `segment_id`→business_segments, `entity_id`→org_entities, `department_id`→org_departments, `function_tag_id`→function_tags（分类均可空，填报仍按角色独立）
+- **business_segments**（业务板块）/ **org_entities**（主体，属板块）/ **org_departments**（部门，属主体）/ **function_tags**（职能标签，全局）：组织架构三层 + 职能标签
 - **users**: `id`, `username`(unique), `password_hash`, `role_id`→roles.id
 - **templates**: `id`, `name`, `year`(填报年份), `snapshot`(JSON), `row_label_cols`, `col_label_rows`, `content_rows`, `content_cols`, `content_numeric`, `archived`, `archived_at`, `created_at`
   - 标签/内容区语义：左侧 `row_label_cols` 列为行标签；上方 `col_label_rows` 行为列标签；**内容区 = 行 `[col_label_rows, +content_rows)` × 列 `[row_label_cols, +content_cols)`**
@@ -97,7 +100,7 @@ frontend/
   - `status`：`draft`(草稿) / `submitted`(已提交) / `approved`(已通过) / `rejected`(已退回)
 - **filling_periods**: `id`, `period`(unique), `locked`, `created_at` —— 管理员手动锁定/解锁某填报月
 
-> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表（均幂等）。`filling_periods` 由 `create_all` 自动建表。
+> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列（均幂等）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
 
 ## RESTful API（全部前缀 `/api`）
 
@@ -105,10 +108,13 @@ frontend/
   - `POST /auth/login` {username, password} → `{access_token, user_id, username, role_id, role_name}`
   - `POST /auth/change-password` {old_password, new_password} → 当前登录用户修改自己的密码（需登录）
 - **管理员**（需 `get_current_admin`，即角色名为「管理员」）
-  - `GET /admin/roles` → 角色列表（**不含管理员角色**）
-  - `POST /admin/roles` {name} → 创建角色 + 自动创建默认账号（用户名=角色名，密码=DEFAULT_USER_PASSWORD）
+  - `GET /admin/roles` → 角色列表（**不含管理员角色**，含组织分类名称）
+  - `POST /admin/roles` {name, segment_id?, entity_id?, department_id?, function_tag_id?} → 创建角色（提供 department_id 自动补全其所属 entity/segment）+ 自动创建默认账号
+  - `PUT /admin/roles/{id}` → 编辑角色名称/分类（改名同步更新默认账号 username）
   - `POST /admin/roles/{id}/reset-password` → 重置角色默认账号密码
   - `DELETE /admin/roles/{id}` → 删除角色（管理员角色不可删；角色下存在其他用户时拒绝）
+  - `GET /admin/org` → 组织架构全量树（segments→entities→departments）+ tags
+  - `POST/PUT/DELETE /admin/org/segments`、`/org/entities`、`/org/departments`、`/org/tags` → 组织架构与职能标签增删改（有子级/被引用时拒绝删除）
   - `GET /admin/roles/{id}/templates` → 该角色已绑定模板 id 列表
   - `POST /admin/roles/{id}/templates` {template_ids} → 全量覆盖绑定
   - `GET /admin/overview?period=YYYY-MM` → 填报总览：该年份所有 部门×模板 绑定及周期状态（含未填报）

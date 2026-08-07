@@ -21,6 +21,7 @@ def create_db_and_tables() -> None:
     SQLModel.metadata.create_all(bind=engine)
     _migrate_templates_columns()
     _migrate_workbooks()
+    _migrate_roles_classification()
 
 
 def _migrate_templates_columns() -> None:
@@ -79,6 +80,19 @@ def _migrate_workbooks() -> None:
                 )
             )
             conn.execute(text("DROP TABLE user_workbooks"))
+
+
+def _migrate_roles_classification() -> None:
+    """轻量迁移：为 roles 表补齐角色分类外键列（幂等）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    columns = {c["name"] for c in inspector.get_columns("roles")}
+    with engine.connect() as conn:
+        for col in ("segment_id", "entity_id", "department_id", "function_tag_id"):
+            if col not in columns:
+                conn.execute(text(f"ALTER TABLE roles ADD COLUMN {col} INTEGER"))
+        conn.commit()
 
 
 def get_session() -> Generator[Session, None, None]:
