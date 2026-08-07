@@ -97,7 +97,7 @@ async function main() {
   }
   await page.evaluate(() => {
     const tabs = Array.from(document.querySelectorAll('.ant-tabs-tab'))
-    tabs.find((t) => t.textContent.includes('角色与权限'))?.click()
+    tabs.find((t) => t.textContent.includes('角色管理'))?.click()
   })
   await sleep(1000)
   const roleTabText = await page.evaluate(() => document.body.textContent)

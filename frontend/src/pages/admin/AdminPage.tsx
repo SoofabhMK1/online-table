@@ -76,6 +76,7 @@ import type {
   FillingPeriodItem,
   RoleItem,
   TemplateItem,
+  WorkbookStatus,
 } from '../../api/types'
 import {
   currentPeriod,
@@ -91,11 +92,6 @@ interface TemplateFormValues {
   name: string
   year: number
   contentNumeric: boolean
-}
-
-interface OverviewRoleRow {
-  id: number
-  name: string
 }
 
 /** 根据数据区域起始单元格与使用区域，推算行标签/列标签/内容区。 */
@@ -173,6 +169,9 @@ export default function AdminPage() {
   const [overviewPeriod, setOverviewPeriod] = useState<string>(currentPeriod())
   const [overview, setOverview] = useState<AdminBindingStatus[]>([])
   const [overviewLoading, setOverviewLoading] = useState(false)
+  const [overviewRoleFilter, setOverviewRoleFilter] = useState<number | undefined>(undefined)
+  const [overviewStatusFilter, setOverviewStatusFilter] = useState<WorkbookStatus | undefined>(undefined)
+  const [overviewTemplateSearch, setOverviewTemplateSearch] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewMounted, setPreviewMounted] = useState(false)
   const [previewCell, setPreviewCell] = useState<AdminBindingStatus | null>(null)
@@ -290,17 +289,35 @@ export default function AdminPage() {
     }
   }
 
-  const overviewRoles = useMemo<OverviewRoleRow[]>(() => {
+  const overviewRoleOptions = useMemo(() => {
     const map = new Map<number, string>()
     overview.forEach((o) => map.set(o.role_id, o.role_name))
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name }))
   }, [overview])
 
-  const overviewTemplates = useMemo(() => {
-    const map = new Map<number, string>()
-    overview.forEach((o) => map.set(o.template_id, o.template_name))
-    return Array.from(map.entries()).map(([id, name]) => ({ id, name }))
+  const overviewStatusCounts = useMemo(() => {
+    const counts: Record<WorkbookStatus, number> = {
+      none: 0,
+      draft: 0,
+      submitted: 0,
+      approved: 0,
+      rejected: 0,
+    }
+    overview.forEach((o) => {
+      counts[o.status] = (counts[o.status] ?? 0) + 1
+    })
+    return counts
   }, [overview])
+
+  const filteredOverview = useMemo(() => {
+    const keyword = overviewTemplateSearch.trim().toLowerCase()
+    return overview.filter((o) => {
+      if (overviewRoleFilter !== undefined && o.role_id !== overviewRoleFilter) return false
+      if (overviewStatusFilter !== undefined && o.status !== overviewStatusFilter) return false
+      if (keyword && !o.template_name.toLowerCase().includes(keyword)) return false
+      return true
+    })
+  }, [overview, overviewRoleFilter, overviewStatusFilter, overviewTemplateSearch])
 
   const openPreview = async (cell: AdminBindingStatus) => {
     if (cell.status === 'none') {
@@ -609,12 +626,6 @@ export default function AdminPage() {
     { title: '模板名称', dataIndex: 'name' },
     { title: '年份', dataIndex: 'year', width: 80 },
     {
-      title: '标签区',
-      width: 150,
-      render: (_, record) =>
-        `${record.row_label_cols}列 × ${record.col_label_rows}行`,
-    },
-    {
       title: '数字校验',
       width: 100,
       render: (_, record) =>
@@ -669,12 +680,6 @@ export default function AdminPage() {
     { title: 'ID', dataIndex: 'id', width: 70 },
     { title: '模板名称', dataIndex: 'name' },
     { title: '年份', dataIndex: 'year', width: 80 },
-    {
-      title: '标签区',
-      width: 150,
-      render: (_, record) =>
-        `${record.row_label_cols}列 × ${record.col_label_rows}行`,
-    },
     {
       title: '归档时间',
       dataIndex: 'archived_at',
@@ -732,36 +737,39 @@ export default function AdminPage() {
     },
   ]
 
-  const overviewColumns: TableColumnsType<OverviewRoleRow> = useMemo(
-    () => [
-      { title: '部门', dataIndex: 'name', fixed: 'left', width: 120 },
-      ...overviewTemplates.map((t) => ({
-        title: t.name,
-        key: t.id,
-        width: 150,
-        render: (_: unknown, record: OverviewRoleRow) => {
-          const cell = overview.find(
-            (o) => o.role_id === record.id && o.template_id === t.id,
-          )
-          if (!cell) {
-            return '-'
-          }
-          const meta = STATUS_META[cell.status]
-          return (
-            <Tag
-              color={meta.color}
-              style={{ cursor: 'pointer', width: '100%', textAlign: 'center', marginInlineEnd: 0 }}
-              onClick={() => openPreview(cell)}
-            >
-              {meta.text}
-            </Tag>
-          )
-        },
-      })),
-    ],
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    [overview, overviewTemplates],
-  )
+  const overviewTableColumns: TableColumnsType<AdminBindingStatus> = [
+    { title: '部门', dataIndex: 'role_name', width: 140 },
+    { title: '模板', dataIndex: 'template_name' },
+    {
+      title: '状态',
+      dataIndex: 'status',
+      width: 110,
+      render: (status: WorkbookStatus) => {
+        const meta = STATUS_META[status]
+        return <Tag color={meta.color}>{meta.text}</Tag>
+      },
+    },
+    {
+      title: '更新时间',
+      dataIndex: 'updated_at',
+      width: 180,
+      render: (value: string | null) => (value ? new Date(value).toLocaleString() : '-'),
+    },
+    {
+      title: '操作',
+      width: 100,
+      render: (_, record) => {
+        if (record.status === 'none') {
+          return '-'
+        }
+        return (
+          <Button type="link" size="small" onClick={() => openPreview(record)}>
+            {record.status === 'submitted' ? '审核' : '预览'}
+          </Button>
+        )
+      },
+    },
+  ]
 
   const overviewPanel = (
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
@@ -777,24 +785,56 @@ export default function AdminPage() {
         <Button icon={<ReloadOutlined />} onClick={() => loadOverview(overviewPeriod)}>
           刷新
         </Button>
+        <Typography.Text type="secondary">
+          共 {overview.length} 项，点击状态可筛选
+        </Typography.Text>
       </Space>
       <Space wrap>
-        <Typography.Text type="secondary">图例：</Typography.Text>
         {STATUS_ORDER.map((s) => (
-          <Tag key={s} color={STATUS_META[s].color}>
-            {STATUS_META[s].text}
+          <Tag
+            key={s}
+            color={STATUS_META[s].color}
+            style={{
+              cursor: 'pointer',
+              padding: '4px 14px',
+              fontSize: 14,
+              ...(overviewStatusFilter === s ? { outline: '2px solid #1677ff' } : {}),
+            }}
+            onClick={() =>
+              setOverviewStatusFilter((prev) => (prev === s ? undefined : s))
+            }
+          >
+            {STATUS_META[s].text}（{overviewStatusCounts[s]}）
           </Tag>
         ))}
-        <Typography.Text type="secondary">点击单元格可预览/审核</Typography.Text>
+        <Select
+          allowClear
+          placeholder="筛选部门"
+          style={{ width: 180 }}
+          value={overviewRoleFilter}
+          onChange={setOverviewRoleFilter}
+          options={overviewRoleOptions}
+        />
+        <Input.Search
+          placeholder="搜索模板名称"
+          allowClear
+          style={{ width: 220 }}
+          value={overviewTemplateSearch}
+          onChange={(e) => setOverviewTemplateSearch(e.target.value)}
+        />
       </Space>
       <Table
-        rowKey="id"
-        columns={overviewColumns}
-        dataSource={overviewRoles}
+        rowKey={(record) => `${record.role_id}-${record.template_id}`}
+        columns={overviewTableColumns}
+        dataSource={filteredOverview}
         loading={overviewLoading}
-        pagination={false}
         size="small"
-        scroll={{ x: 'max-content' }}
+        pagination={{
+          pageSize: 10,
+          showSizeChanger: true,
+          showTotal: (total) => `共 ${total} 条`,
+        }}
+        scroll={{ x: 900 }}
       />
     </Space>
   )
@@ -910,7 +950,7 @@ export default function AdminPage() {
     </Space>
   )
 
-  const permissionPanel = (
+  const rolePanel = (
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
       <Card title="角色管理" size="small">
         <Space style={{ marginBottom: 16 }}>
@@ -933,7 +973,11 @@ export default function AdminPage() {
           size="small"
         />
       </Card>
+    </Space>
+  )
 
+  const bindingPanel = (
+    <Space orientation="vertical" style={{ width: '100%' }} size="large">
       <Card title="模板绑定" size="small">
         <Space orientation="vertical" style={{ width: '100%' }} size="large">
           <Space>
@@ -997,7 +1041,8 @@ export default function AdminPage() {
         <Tabs
           items={[
             { key: 'templates', label: '模板管理', children: templatePanel },
-            { key: 'permissions', label: '角色与权限', children: permissionPanel },
+            { key: 'roles', label: '角色管理', children: rolePanel },
+            { key: 'permissions', label: '模板权限', children: bindingPanel },
             { key: 'overview', label: '填报总览', children: overviewPanel },
             { key: 'periods', label: '填报期间', children: periodPanel },
             { key: 'archived', label: '归档模板', children: archivedPanel },

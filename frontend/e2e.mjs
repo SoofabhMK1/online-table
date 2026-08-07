@@ -151,7 +151,7 @@ async function main() {
   report('API 绑定模板到运营部', bind.status === 200, `role=${opRole.name} tid=${created.id}`)
 
   // 权限配置 Tab：Transfer 渲染并反映绑定
-  await clickByText(page, '角色与权限')
+  await clickByText(page, '模板权限')
   await page.waitForSelector('.ant-transfer', { timeout: 15000 })
   await sleep(800)
   // 切换角色到 运营部
