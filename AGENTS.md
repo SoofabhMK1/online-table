@@ -43,7 +43,7 @@ backend/
 └── app/
     ├── config.py            # Settings：SECRET_KEY、DATABASE_URL、ADMIN_ROLE_NAME、DEFAULT_USER_PASSWORD
     ├── database.py          # SQLite engine、create_db_and_tables、轻量迁移（含 user_workbooks→role_workbooks 归并）、get_session
-    ├── models.py            # 6 张 SQLModel 数据表（role_workbooks 支持周期与状态，filling_periods 支持期间锁定）
+    ├── models.py            # SQLModel 数据表（10 张：5 业务表 + 4 组织表 + filling_periods）
     ├── schemas.py           # Pydantic 请求/响应模型
     ├── security.py          # bcrypt 哈希、JWT 编解码
     ├── dependencies.py      # get_current_user、get_current_admin
@@ -67,7 +67,7 @@ frontend/
     ├── store/useAuthStore.ts# token/userId/username/roleId/roleName，persist
     ├── components/
     │   ├── UniverSheet.tsx  # 核心表格组件（见下文，支持 readOnly）
-    │   ├── ChangePasswordModal.tsx  # 用户自助修改密码弹窗
+    │   ├── AccountSettingsModal.tsx  # 用户自助修改用户名/密码弹窗
     │   ├── OrgManager.tsx   # 组织架构管理（板块→主体→部门 + 职能标签）
     │   ├── univerLocales.ts # 聚合各 Univer 包的 zh-CN 语言包
     │   ├── ProtectedRoute.tsx / AdminRoute.tsx / RootRedirect.tsx
@@ -86,7 +86,7 @@ frontend/
 
 ## 数据库模型（`backend/app/models.py`）
 
-5 张表，snapshot 均以 SQLAlchemy `Column(JSON)` 存 SQLite（自动序列化，**禁止二次 json.dumps**）。
+10 张表：`BusinessSegment` / `OrgEntity` / `OrgDepartment` / `FunctionTag`（组织架构 + 职能标签）、`Role` / `User` / `Template` / `RoleTemplateMapping` / `RoleWorkbook`（业务核心）、`FillingPeriod`（期间锁定）。snapshot 均以 SQLAlchemy `Column(JSON)` 存 SQLite（自动序列化，**禁止二次 json.dumps**）。
 
 - **roles**: `id`, `name`（**部门内唯一**，复合唯一 `(department_id, name)`）, `segment_id`→business_segments, `entity_id`→org_entities, `department_id`→org_departments, `function_tag_id`→function_tags（分类均可空，填报仍按角色独立；默认账号用户名 = `role_{id}`）
 - **business_segments**（业务板块）/ **org_entities**（主体，属板块）/ **org_departments**（部门，属主体）/ **function_tags**（职能标签，全局）：组织架构三层 + 职能标签
@@ -101,7 +101,9 @@ frontend/
   - `status`：`draft`(草稿) / `submitted`(已提交) / `approved`(已通过) / `rejected`(已退回)
 - **filling_periods**: `id`, `period`(unique), `locked`, `created_at` —— 管理员手动锁定/解锁某填报月
 
-> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列；`database._migrate_role_name_uniqueness()` 将角色名唯一性由全局改为部门内（删 `ix_roles_name`、建 `ix_roles_department_name`，均幂等）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
+> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列；`database._migrate_role_name_uniqueness()` 将角色名唯一性由全局改为部门内（删 `ix_roles_name`、建 `ix_roles_department_name`，均幂等）；`database._migrate_users_default_flag()` 新增 `users.is_default` 列，并对「0 个默认账号 + 仅 1 个用户」的角色回填默认账号标记（处理旧版 seed 残留）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
+
+> SQLite FK 约束：每个新连接通过 `event.listens_for(engine, "connect")` 钩子执行 `PRAGMA foreign_keys=ON`（SQLite 默认 OFF）。删除角色时级联清理其模板绑定 + 填报历史（详见 `admin.delete_role`）。
 
 ## RESTful API（全部前缀 `/api`）
 
@@ -114,7 +116,7 @@ frontend/
   - `POST /admin/roles` {name, segment_id?, entity_id?, department_id?, function_tag_id?} → 创建角色（提供 department_id 自动补全其所属 entity/segment）+ 自动创建默认账号
   - `PUT /admin/roles/{id}` → 编辑角色名称/分类（改名同步更新默认账号 username）
   - `POST /admin/roles/{id}/reset-password` → 重置角色默认账号密码
-  - `DELETE /admin/roles/{id}` → 删除角色（管理员角色不可删；角色下存在其他用户时拒绝）
+  - `DELETE /admin/roles/{id}` {confirm_name} → 删除角色（管理员角色不可删；要求回传 confirm_name 与角色名一致；级联清理模板绑定 + 填报历史 + 默认账号；角色下仍有非默认用户时拒绝）
   - `GET /admin/org` → 组织架构全量树（segments→entities→departments）+ tags
   - `POST/PUT/DELETE /admin/org/segments`、`/org/entities`、`/org/departments`、`/org/tags` → 组织架构与职能标签增删改（有子级/被引用时拒绝删除）
   - `GET /admin/roles/{id}/templates` → 该角色已绑定模板 id 列表
@@ -156,8 +158,9 @@ frontend/
 4. **FUniver 导入**：`FUniver` 从 `@univerjs/core/facade` 导入；`getActiveWorkbook` 等 sheet facade 方法需要 `@univerjs/sheets/facade` 类型扩展（preset 内部已引入）。
 5. **snapshot 即对象/字典**：前后端与 SQLite 落盘都直接用 dict，不做 Stringify/Parse 冗余处理。
 6. **前后端字段命名**：前端类型用 snake_case 与后端一致（如 `row_label_cols`），Univer 组件内用 camelCase（`rowLabelCols`），在 API 层转换。
-7. **默认密码统一**：`config.DEFAULT_USER_PASSWORD = "123456"`，角色默认账号用户名 = 角色名。
-8. **bcrypt 版本锁定**：`bcrypt==4.0.1`（passlib 1.7.4 与 bcrypt≥4.1 有 `__about__` 兼容问题）。
+7. **默认账号用户名 = `role_{id}`**（与角色名解耦、改名不影响）；默认密码统一：`config.DEFAULT_USER_PASSWORD = "123456"`。账号用户名可在账号设置中自行修改，旧 scheme（`username=role.name`）的历史数据由 `_migrate_users_default_flag()` 回填 `is_default` 标记。
+8. **bcrypt 版本锁定**：`bcrypt==4.0.1`（passlib 1.7.4 与 bcrypt≥4.1 有 `__about__` 兼容问题）。**Univer 版本锁定**：所有 `@univerjs/*` 与 `preset-sheets-core` 锁精确版本（无 `^`），因 5 处依赖私有 API（`VALIDATE_CELL`、`SheetInterceptorService.writeCellInterceptor`、`FUniver` facade、`workbookPermission.setPoint`、`univer.dispose()` 延后语义），升级需回归这些点。
+9. **SECRET_KEY 校验**：开发环境打印 WARN；生产环境设 `STRICT_SECRETS=1`，启动时若 SECRET_KEY 长度 < 32 或含占位串立即抛错。
 
 ## 启动与常用命令
 
@@ -175,25 +178,35 @@ npm run build      # tsc -b && vite build（类型检查 + 产物）
 npm run lint       # oxlint
 ```
 
-演示账号：`admin/admin123`（管理员）、`运营部/123456` 或 `op1/pw123`（普通用户）。
+演示账号：`admin/admin123`（管理员）、`role_{demo_role_id}/123456`（运营部默认账号；具体 ID 由 seed 时分配）或 `op1/pw123`（演示用户）。
 
 ## 端到端测试（Puppeteer + 本机 Chrome）
 
 前置：先后台 `uvicorn` + 前端 `npm run dev` 已在运行，且数据库已 seed。
 
-- `e2e.mjs` — 主流程：管理员登录→Modal 建表→绑定运营部→用户填报保存。
-- `e2e_labels.mjs` — 标签模板 + 角色创建 + 用户填报时标签单元格只读。
-- `e2e_fixes.mjs` — 保存后重进加载已存数据、退出登录跳转。
-- `e2e_period.mjs` — 期间锁定（锁定→拒存→解锁→可存）+ 内容区数字校验 + 工作表级权限（新建工作表按钮禁用）。
-- `e2e_import.mjs` — 模板导入（含合并单元格 xlsx→弹窗→保存）+ 导出 + 归档/恢复。
+共享辅助：`frontend/e2e_helpers.mjs`（`BASE` / `Reporter` / `launchBrowser` / `login` / `apiLogin` / `waitCanvas` / `clickByText` / `gotoWithRetry` / `uniqueSuffix`）。
+
+可用 npm 脚本（在 `frontend/` 下）：
+
+- `npm run e2e` — 顺序运行全部 5 个 e2e
+- `npm run e2e:main` — `e2e.mjs`：主流程（管理员登录 → Modal 建表 → 绑定运营部 → 用户填报保存）
+- `npm run e2e:labels` — `e2e_labels.mjs`：标签模板 + 角色创建 + 用户填报时标签单元格只读（含「输入是否落地」负向断言）
+- `npm run e2e:fixes` — `e2e_fixes.mjs`：保存后重进加载已存数据、退出登录跳转
+- `npm run e2e:period` — `e2e_period.mjs`：期间锁定（锁定 → 拒存 → 解锁 → 可存）+ 内容区数字校验 + 工作表级权限
+- `npm run e2e:import` — `e2e_import.mjs`：模板导入（含合并单元格 xlsx → 弹窗 → 保存）+ 导出 + 归档/恢复
+
+环境变量：
+- `E2E_BASE`（默认 `http://localhost:5173`）：覆盖前端地址（CI 换端口）
+- `CHROME_PATH`（默认 `C:/Program Files/Google/Chrome/Application/chrome.exe`）：Chrome 可执行路径
+- `CI=true`：启用 puppeteer `headless: true`
 
 > 注：puppeteer 无法拦截浏览器 blob 下载，导出用「已导出」成功提示断言。
 
 要点：
-- 本机 Chrome 路径 `C:\Program Files\Google\Chrome\Application\chrome.exe`（`puppeteer-core` 直连）。
-- **Vite 首次依赖优化会 504**，测试脚本需在首屏后 `reload` 重试。
+- 本机 Chrome 路径可通过 `CHROME_PATH` 环境变量覆盖。
+- **Vite 首次依赖优化会 504**，测试脚本需在首屏后 `reload` 重试（`gotoWithRetry` 自动处理）。
 - 自动化环境下 Univer 单元格输入的坐标映射可能漂移（有滚动/缩放偏移），**不要依赖 puppeteer 键盘输入精确验证「可编辑」**；「只读/被锁定」可用保存后快照对比验证。应用真实输入以浏览器手动测试为准。
-- 测试会写库；如需干净环境：先停进程 → `Remove-Item backend/app.db` → 重新 seed。
+- 测试会写库；脚本均通过 `Date.now()` 后缀保证资源名唯一（角色名/模板名），并在 `finally` 中清理创建的资源，因此可重复运行。如需完全干净环境：先停进程 → `Remove-Item backend/app.db` → 重新 seed。
 
 ## 开发约定
 

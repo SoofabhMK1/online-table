@@ -1,6 +1,7 @@
 from collections.abc import Generator
 from datetime import datetime
 
+from sqlalchemy import event
 from sqlmodel import SQLModel, Session, create_engine
 
 from app.config import settings
@@ -11,6 +12,14 @@ engine = create_engine(
     settings.DATABASE_URL,
     connect_args={"check_same_thread": False},
 )
+
+
+@event.listens_for(engine, "connect")
+def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
+    """每个新连接启用外键约束（SQLite 默认 OFF，开启后 FK 才生效）。"""
+    cursor = dbapi_connection.cursor()
+    cursor.execute("PRAGMA foreign_keys=ON")
+    cursor.close()
 
 
 def create_db_and_tables() -> None:
@@ -112,7 +121,12 @@ def _migrate_role_name_uniqueness() -> None:
 
 
 def _migrate_users_default_flag() -> None:
-    """轻量迁移：为 users 表补齐 is_default 标记列（幂等）。"""
+    """轻量迁移：为 users 表补齐 is_default 标记列（幂等）。
+
+    列新增完成后，回填「0 个默认账号 + 仅 1 个用户」的角色：把那个唯一用户
+    标记为 is_default=True。这处理了旧版 seed_demo（username=role.name）留下
+    的历史数据；多用户角色不做猜测，依赖 seed/管理 API 显式指定。
+    """
     from sqlalchemy import inspect, text
 
     inspector = inspect(engine)
@@ -121,6 +135,21 @@ def _migrate_users_default_flag() -> None:
         with engine.begin() as conn:
             conn.execute(
                 text("ALTER TABLE users ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0")
+            )
+            conn.execute(
+                text(
+                    """
+                    UPDATE users
+                    SET is_default = 1
+                    WHERE id IN (
+                        SELECT u.id FROM users u
+                        JOIN roles r ON r.id = u.role_id
+                        WHERE r.name <> '管理员'
+                        GROUP BY u.role_id
+                        HAVING SUM(u.is_default) = 0 AND COUNT(*) = 1
+                    )
+                    """
+                )
             )
 
 

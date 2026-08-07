@@ -53,8 +53,8 @@ npm run build      # 类型检查 + 产物构建
 | 账号 | 密码 | 角色 |
 |---|---|---|
 | admin | admin123 | 管理员 |
-| 运营部 | 123456 | 运营部（角色默认账号，用户名=角色名） |
-| op1 | pw123 | 运营部（演示用户） |
+| `role_{demo_role_id}` | 123456 | 运营部（角色默认账号，用户名 = `role_{id}`；具体 ID 由 seed 分配，查看 AdminPage「角色管理」或 `SELECT id FROM roles WHERE name='运营部';`） |
+| op1 | pw123 | 运营部（演示用户，与默认账号解耦） |
 
 ## 使用流程
 
@@ -88,14 +88,21 @@ frontend/
 前置：先后台 `uvicorn` + 前端 `npm run dev`，并已 seed。在 `frontend/` 下运行：
 
 ```bash
-node e2e.mjs          # 主流程
-node e2e_labels.mjs   # 标签保护
-node e2e_fixes.mjs    # 保存回读 / 退出登录
-node e2e_period.mjs   # 期间锁定 + 数字校验 + 工作表权限
-node e2e_import.mjs   # 模板导入/导出/归档
+npm run e2e            # 顺序跑全部 5 个
+npm run e2e:main       # 主流程
+npm run e2e:labels     # 标签保护
+npm run e2e:fixes      # 保存回读 / 退出登录
+npm run e2e:period     # 期间锁定 + 数字校验 + 工作表权限
+npm run e2e:import     # 模板导入/导出/归档
 ```
+
+可用环境变量：`E2E_BASE`（默认 `http://localhost:5173`）、`CHROME_PATH`（Chrome 可执行路径）、`CI=true`（启用 headless）。
+
+> ⚠️ 测试会写开发数据库。脚本均使用 `Date.now()` 后缀保证资源名唯一，并在 `finally` 中清理创建的资源，因此可重复运行；如需完全干净环境：先停后端 → `Remove-Item backend/app.db` → 重新 `seed.py` + `seed_demo.py`。
 
 ## 生产部署注意事项
 
-- `backend/app/config.py` 中的 `SECRET_KEY` 为开发占位值，**生产环境务必通过环境变量覆盖**
+- `backend/app/config.py` 中的 `SECRET_KEY` 为开发占位值，**生产环境务必通过环境变量覆盖 ≥ 32 字节随机密钥**，并设置 `STRICT_SECRETS=1` 让不合规密钥启动即报错。
+- `frontend/vite.config.ts` 已开启 `strictPort: true`：端口被占用时直接报错（避免 5173→5174 静默切换导致反向代理 / e2e 连错端口）。
+- `@univerjs/*` 全部锁精确版本（无 `^`），因依赖多处 Univer 私有 API；升级前需回归标签保护 / dispose 语义。
 - 更多架构决策与开发约定见 [AGENTS.md](./AGENTS.md)

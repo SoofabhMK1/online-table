@@ -36,6 +36,7 @@ from app.schemas import (
     OrgTreeRead,
     PERIOD_PATTERN,
     RoleCreate,
+    RoleDeleteConfirm,
     RoleRead,
     RoleTemplateBind,
     RoleUpdate,
@@ -54,36 +55,35 @@ def _role_default_username(role: Role) -> str:
 def _ensure_role_default_user(session: Session, role: Role) -> User:
     """确保角色存在默认账号（按 is_default 标记定位，用户名可在账号设置中自行修改）。
 
-    定位顺序：is_default 用户 → 旧 scheme（username=role_{id}）回填标记 → 角色下首个用户兜底 → 新建。
+    定位顺序：is_default 用户 → 旧 scheme（username=role_{id}）回填标记 → 新建。
+    不再使用「角色下首个任意用户」兜底：会误把 op1 等业务账号标记为默认，导致
+    reset_role_password 重置错对象。找不到时直接创建 role_{id} 新用户。
     """
     user = session.exec(
         select(User).where(User.role_id == role.id, User.is_default == True)  # noqa: E712
     ).first()
-    if user is None:
-        user = session.exec(
-            select(User).where(
-                User.role_id == role.id, User.username == _role_default_username(role)
-            )
-        ).first()
-        if user is None:
-            user = session.exec(
-                select(User).where(User.role_id == role.id).order_by(User.id)
-            ).first()
-        if user is not None:
-            user.is_default = True
-            session.add(user)
-            session.commit()
-            session.refresh(user)
-            return user
-        user = User(
-            username=_role_default_username(role),
-            password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
-            role_id=role.id,
-            is_default=True,
+    if user is not None:
+        return user
+    user = session.exec(
+        select(User).where(
+            User.role_id == role.id, User.username == _role_default_username(role)
         )
+    ).first()
+    if user is not None:
+        user.is_default = True
         session.add(user)
         session.commit()
         session.refresh(user)
+        return user
+    user = User(
+        username=_role_default_username(role),
+        password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
+        role_id=role.id,
+        is_default=True,
+    )
+    session.add(user)
+    session.commit()
+    session.refresh(user)
     return user
 
 
@@ -285,8 +285,18 @@ async def reset_role_password(
 
 
 @router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
-async def delete_role(role_id: int, session: Session = Depends(get_session)) -> None:
-    """删除角色（同时解除其模板绑定与默认账号，并要求角色下无其他用户）。"""
+async def delete_role(
+    role_id: int,
+    body: RoleDeleteConfirm,
+    session: Session = Depends(get_session),
+) -> None:
+    """删除角色，并级联清理其填报历史与模板绑定（要求管理员回传角色名二次确认）。
+
+    级联删除范围：
+    - role_template_mapping：模板绑定
+    - role_workbooks：填报历史（草稿/已提交/已通过/已退回），一并删除
+    - users：仅删除 is_default=True 的默认账号；其他业务用户需先转出/删除
+    """
     role = session.get(Role, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
@@ -294,9 +304,11 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色不可删除"
         )
-    default_user = session.exec(
-        select(User).where(User.role_id == role_id, User.is_default == True)  # noqa: E712
-    ).first()
+    if body.confirm_name != role.name:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="确认名称与角色名不一致，已取消删除",
+        )
     other_users = session.exec(
         select(User).where(User.role_id == role_id, User.is_default != True)  # noqa: E712
     ).all()
@@ -304,12 +316,23 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="该角色下存在用户，无法删除"
         )
+
+    # 级联清理：模板绑定
     for link in session.exec(
         select(RoleTemplateMapping).where(RoleTemplateMapping.role_id == role_id)
     ).all():
         session.delete(link)
-    if default_user is not None:
+    # 级联清理：填报历史
+    for wb in session.exec(
+        select(RoleWorkbook).where(RoleWorkbook.role_id == role_id)
+    ).all():
+        session.delete(wb)
+    # 清理默认账号
+    for default_user in session.exec(
+        select(User).where(User.role_id == role_id, User.is_default == True)  # noqa: E712
+    ).all():
         session.delete(default_user)
+
     session.delete(role)
     session.commit()
 
@@ -737,11 +760,15 @@ async def review_role_workbook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="仅可审核已提交的填报",
         )
+    try:
+        reason = body.validated_reason()
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)
+        ) from exc
     workbook.status = body.action
     workbook.review_at = datetime.utcnow()
-    workbook.reject_reason = (
-        body.reject_reason if body.action == "rejected" else None
-    )
+    workbook.reject_reason = reason if body.action == "rejected" else None
     session.add(workbook)
     session.commit()
     session.refresh(workbook)

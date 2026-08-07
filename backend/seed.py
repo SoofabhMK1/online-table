@@ -36,6 +36,7 @@ def ensure_admin() -> None:
                 username=ADMIN_USERNAME,
                 password_hash=hash_password(ADMIN_PASSWORD),
                 role_id=role.id,
+                is_default=True,
             )
             session.add(user)
             session.commit()
