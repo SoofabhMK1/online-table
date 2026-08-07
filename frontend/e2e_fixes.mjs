@@ -1,22 +1,13 @@
-/* eslint-disable no-console */
 // 验证：#2 保存后重进加载已存数据；#4 退出登录按钮
-import puppeteer from 'puppeteer-core'
 import axios from 'axios'
-
-const BASE = 'http://localhost:5173'
-const CHROME = 'C:/Program Files/Google/Chrome/Application/chrome.exe'
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms))
-const currentPeriod = () => {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-const results = []
-const report = (n, ok, x = '') => { results.push(ok); console.log(`${ok ? 'PASS' : 'FAIL'}  ${n}${x ? '  ' + x : ''}`) }
+import { Reporter, uniqueSuffix, currentPeriod, sleep, BASE } from './e2e_helpers.mjs'
 
 async function main() {
-  // 准备：模板(标签1,1) + 绑定运营部
-  const admin = await axios.post(`${BASE}/api/auth/login`, { username: 'admin', password: 'admin123' })
-  const h = { Authorization: `Bearer ${admin.data.access_token}` }
+  const r = new Reporter('FIXES E2E')
+  const ah = await r.apiLogin('admin', 'admin123')
+  const uh = await r.apiLogin('op1', 'pw123')
+
+  const tplName = `保存测试表${uniqueSuffix()}`
   const snapshot = {
     id: 'save_wb', appVersion: '0.25.1', locale: 'zhCN', name: '保存测试',
     styles: {}, sheetOrder: ['s1'],
@@ -26,72 +17,67 @@ async function main() {
         '1': { '0': { v: '营收' } }, '2': { '0': { v: '成本' } },
       } } },
   }
-  const tpl = await axios.post(`${BASE}/api/templates`, { name: '保存测试表', snapshot, row_label_cols: 1, col_label_rows: 1 }, { headers: h })
-  const tid = tpl.data.id
-  const roles = (await axios.get(`${BASE}/api/admin/roles`, { headers: h })).data
-  const op = roles.find((r) => r.name === '运营部')
-  await axios.post(`${BASE}/api/admin/roles/${op.id}/templates`, { template_ids: [tid] }, { headers: h })
 
-  // 用户：先 POST 一份已填数据（模拟点击保存）→ 内容区 B2="123"
-  const opLogin = await axios.post(`${BASE}/api/auth/login`, { username: 'op1', password: 'pw123' })
-  const opH = { Authorization: `Bearer ${opLogin.data.access_token}` }
+  // 准备：模板(标签1,1) + 绑定运营部
+  const tpl = await axios.post(`${BASE}/api/templates`, {
+    name: tplName, snapshot, row_label_cols: 1, col_label_rows: 1,
+  }, { headers: ah })
+  const tid = tpl.data.id
+  const roles = (await axios.get(`${BASE}/api/admin/roles`, { headers: ah })).data
+  const op = roles.find((r) => r.name === '运营部')
+  await axios.post(`${BASE}/api/admin/roles/${op.id}/templates`, { template_ids: [tid] }, { headers: ah })
+
+  // 用户：先 POST 一份已填数据 → 内容区 B2="123"
   const filledSnapshot = JSON.parse(JSON.stringify(snapshot))
-  filledSnapshot.sheets.s1.cellData['1']['1'] = { v: '123' } // B2
-  await axios.post(`${BASE}/api/workspace/workbooks`, {
+  filledSnapshot.sheets.s1.cellData['1']['1'] = { v: '123' }
+  const saveResp = await axios.post(`${BASE}/api/workspace/workbooks`, {
     template_id: tid,
     period: currentPeriod(),
     snapshot: filledSnapshot,
     action: 'save',
-  }, { headers: opH })
-  report('POST 保存填报数据', true, `period=${currentPeriod()}`)
+  }, { headers: uh })
+  r.report('POST 保存填报数据', saveResp.status === 201 || saveResp.status === 200, `period=${currentPeriod()}`)
 
-  // 浏览器：用户打开填报视图，拦截模板详情接口（现返回用户已保存数据）
-  const browser = await puppeteer.launch({ executablePath: CHROME, headless: false, args: ['--no-sandbox'] })
-  const page = await browser.newPage()
-  await page.setViewport({ width: 1440, height: 900 })
-  let wbResponse = null
-  page.on('response', async (res) => {
-    if (res.url().includes(`/api/workspace/templates/${tid}`) && res.request().method() === 'GET') {
-      try { wbResponse = await res.json() } catch { wbResponse = { err: true } }
-    }
-  })
+  const browser = await r.launchBrowser()
+  try {
+    const page = await browser.newPage()
+    await page.setViewport({ width: 1440, height: 900 })
+    let wbResponse = null
+    page.on('response', async (res) => {
+      if (res.url().includes(`/api/workspace/templates/${tid}`) && res.request().method() === 'GET') {
+        try { wbResponse = await res.json() } catch { wbResponse = { err: true } }
+      }
+    })
 
-  await page.goto(`${BASE}/login`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await sleep(3000)
-  try { await page.waitForSelector('#username', { timeout: 10000 }) } catch {
-    await page.reload({ waitUntil: 'networkidle0', timeout: 60000 }); await sleep(2500); await page.waitForSelector('#username', { timeout: 15000 })
+    await r.login(page, 'op1', 'pw123')
+    await page.goto(`${BASE}/workspace/templates/${tid}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await r.waitCanvas(page, 'body', 15000)
+    await sleep(2500)
+
+    const b2Value = wbResponse ? JSON.stringify(wbResponse.snapshot?.sheets?.s1?.cellData?.['1']?.['1']?.v) : 'NO_RESPONSE'
+    r.report('重新进入时加载用户已保存数据 (B2=123)', b2Value === '"123"', `B2=${b2Value}`)
+
+    // #4 退出登录按钮
+    const hasLogout = await page.evaluate(() =>
+      Array.from(document.querySelectorAll('button')).some((b) => b.textContent?.replace(/\s+/g, '').includes('退出登录')),
+    )
+    r.report('工作台有退出登录按钮', hasLogout)
+    await page.evaluate(() => {
+      const btns = Array.from(document.querySelectorAll('button'))
+      btns.find((b) => b.textContent?.replace(/\s+/g, '').includes('退出登录'))?.click()
+    })
+    await sleep(1500)
+    const afterLogout = await page.evaluate(() => location.pathname)
+    r.report('点击退出登录跳转 /login', afterLogout === '/login', `path=${afterLogout}`)
+  } finally {
+    await browser.close()
+    // 清理本脚本创建的模板
+    try {
+      await axios.delete(`${BASE}/api/templates/${tid}`, { headers: ah }).catch(() => {})
+    } catch { /* ignore */ }
   }
-  await page.type('#username', 'op1')
-  await page.type('#password', 'pw123')
-  await page.click('button[type="submit"]')
-  await page.waitForFunction(() => location.pathname !== '/login', { timeout: 30000 })
-  await page.goto(`${BASE}/workspace/templates/${tid}`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-  await sleep(3000)
-  try { await page.waitForSelector('canvas', { timeout: 8000 }) } catch {
-    await page.reload({ waitUntil: 'networkidle0', timeout: 60000 }); await sleep(2000); await page.waitForSelector('canvas', { timeout: 15000 })
-  }
-  await sleep(2500)
 
-  const b2Value = wbResponse ? JSON.stringify(wbResponse.snapshot?.sheets?.s1?.cellData?.['1']?.['1']?.v) : 'NO_RESPONSE'
-  report('重新进入时加载用户已保存数据 (B2=123)', b2Value === '"123"', `B2=${b2Value}`)
-
-  // #4 退出登录按钮
-  const hasLogout = await page.evaluate(() =>
-    Array.from(document.querySelectorAll('button')).some((b) => b.textContent.replace(/\s+/g, '').includes('退出登录')),
-  )
-  report('工作台有退出登录按钮', hasLogout)
-  await page.evaluate(() => {
-    const btns = Array.from(document.querySelectorAll('button'))
-    btns.find((b) => b.textContent.replace(/\s+/g, '').includes('退出登录'))?.click()
-  })
-  await sleep(1500)
-  const afterLogout = await page.evaluate(() => location.pathname)
-  report('点击退出登录跳转 /login', afterLogout === '/login', `path=${afterLogout}`)
-
-  await browser.close()
-  console.log('total:', results.filter(Boolean).length, '/', results.length)
-  if (results.some((r) => !r)) process.exit(1)
-  console.log('FIXES E2E ALL PASSED')
+  r.finalize()
 }
 
 main().catch((e) => { console.error('E2E FAILED:', e.message); process.exit(1) })
