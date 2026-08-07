@@ -5,7 +5,7 @@ from sqlmodel import Session, select
 
 from app.database import get_session
 from app.dependencies import get_current_user
-from app.models import RoleTemplateMapping, RoleWorkbook, Template, User
+from app.models import FillingPeriod, RoleTemplateMapping, RoleWorkbook, Template, User
 from app.schemas import (
     PERIOD_PATTERN,
     WorkbookSubmit,
@@ -14,6 +14,86 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
+
+
+def _is_period_locked(session: Session, period: str) -> bool:
+    """查询指定填报周期是否被管理员手动锁定。"""
+    record = session.exec(
+        select(FillingPeriod).where(FillingPeriod.period == period)
+    ).first()
+    return bool(record and record.locked)
+
+
+def _validate_content_numeric(snapshot: dict, template: Template) -> None:
+    """内容区仅允许数字：校验内容区矩形内非空单元格必须为数值，否则抛出 400。"""
+    if not template.content_numeric:
+        return
+    if template.content_rows <= 0 or template.content_cols <= 0:
+        return
+    sheets = snapshot.get("sheets", {}) or {}
+    invalid_cells: list[str] = []
+    # 遍历所有 sheet 的内容区矩形
+    for sheet_name, sheet in sheets.items():
+        if not isinstance(sheet, dict):
+            continue
+        cell_data = sheet.get("cellData", {}) or {}
+        for row, col in _iter_content_area(template):
+            row_data = cell_data.get(str(row))
+            if not isinstance(row_data, dict):
+                continue
+            cell = row_data.get(str(col))
+            if not isinstance(cell, dict) or cell.get("v") in (None, ""):
+                continue
+            value = cell.get("v")
+            if not _is_numeric(value):
+                col_letter = _col_index_to_letter(col)
+                invalid_cells.append(f"{col_letter}{row + 1}")
+    if invalid_cells:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"单元格 {'、'.join(invalid_cells)} 需为数字",
+        )
+
+
+def _iter_content_area(template: Template):
+    """生成内容区矩形内的 (row, col) 坐标（行列从 0 开始）。"""
+    for row in range(
+        template.col_label_rows,
+        template.col_label_rows + template.content_rows,
+    ):
+        for col in range(
+            template.row_label_cols,
+            template.row_label_cols + template.content_cols,
+        ):
+            yield row, col
+
+
+def _is_numeric(value) -> bool:
+    if isinstance(value, bool):
+        return False
+    if isinstance(value, (int, float)):
+        return True
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return True  # 空串视作空值，放行
+        # 允许千分位逗号与正负号
+        try:
+            float(stripped.replace(",", ""))
+            return True
+        except ValueError:
+            return False
+    return False
+
+
+def _col_index_to_letter(col: int) -> str:
+    """将 0 起始列号转换为 Excel 列字母（0 -> A）。"""
+    letters = ""
+    n = col + 1
+    while n > 0:
+        n, remainder = divmod(n - 1, 26)
+        letters = chr(65 + remainder) + letters
+    return letters
 
 
 def _ensure_template_allowed(
@@ -69,9 +149,11 @@ async def list_accessible_templates(
         .where(
             RoleTemplateMapping.role_id == current_user.role_id,
             Template.year == year,
+            Template.archived == False,  # noqa: E712
         )
         .order_by(Template.id)
     ).all()
+    locked = _is_period_locked(session, period)
     return [
         WorkspaceTemplateItem(
             id=template.id,
@@ -81,8 +163,10 @@ async def list_accessible_templates(
             col_label_rows=template.col_label_rows,
             content_rows=template.content_rows,
             content_cols=template.content_cols,
+            content_numeric=template.content_numeric,
             status=workbook.status if workbook else "none",
             submit_at=workbook.submit_at if workbook else None,
+            locked=locked,
         )
         for template, workbook in rows
     ]
@@ -106,9 +190,11 @@ async def get_accessible_template(
         col_label_rows=template.col_label_rows,
         content_rows=template.content_rows,
         content_cols=template.content_cols,
+        content_numeric=template.content_numeric,
         status=workbook.status if workbook else "none",
         submit_at=workbook.submit_at if workbook else None,
         reject_reason=workbook.reject_reason if workbook else None,
+        locked=_is_period_locked(session, period),
         snapshot=workbook.snapshot if workbook else template.snapshot,
     )
 
@@ -126,6 +212,13 @@ async def submit_workbook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该模板不属于此填报年份",
         )
+    if _is_period_locked(session, body.period):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该周期已被管理员锁定，无法修改",
+        )
+    if body.action == "submit":
+        _validate_content_numeric(body.snapshot, template)
 
     workbook = _get_workbook(session, current_user.role_id, body.template_id, body.period)
 

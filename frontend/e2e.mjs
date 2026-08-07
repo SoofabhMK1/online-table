@@ -93,21 +93,28 @@ async function main() {
   await gotoWithRetry(page, `${BASE}/admin`, '.ant-tabs')
   report('管理端登录并进入 /admin', true)
 
-  // 新建模板
+  // 新建模板（:has(#name) 限定“新建/编辑模板”弹窗，规避 forceRender 的预览弹窗）
+  const CREATE_MODAL = '.ant-modal:has(#name)'
   await page.click('.ant-btn-primary')
   await sleep(2000)
-  await page.waitForSelector('.ant-modal', { timeout: 15000 })
+  await page.waitForSelector(CREATE_MODAL, { timeout: 15000 })
   await sleep(1500)
-  await waitCanvas(page, '.ant-modal')
+  await waitCanvas(page, CREATE_MODAL)
   await sleep(2000)
   const modalCanvas = await page.evaluate(
-    () => document.querySelectorAll('.ant-modal canvas').length,
+    (sel) => document.querySelector(sel)?.querySelectorAll('canvas').length ?? 0,
+    CREATE_MODAL,
   )
   report('Modal 内 Univer 已渲染', modalCanvas > 0)
 
   const templateName = `测试模板${Date.now().toString().slice(-6)}`
   await page.type('#name', templateName)
-  await clickByText(page, '保存', '.ant-modal-footer')
+  await page.type('input[placeholder="如：B3"]', 'A1')
+  await page.evaluate((sel) => {
+    const modal = document.querySelector(sel)
+    const btns = Array.from(modal?.querySelectorAll('.ant-modal-footer button') ?? [])
+    btns.find((b) => b.textContent.replace(/\s+/g, '') === '保存')?.click()
+  }, CREATE_MODAL)
   await page.waitForFunction(
     (name) =>
       document.body.textContent.includes('模板创建成功') &&
@@ -124,11 +131,11 @@ async function main() {
       if (b.textContent.trim() === '编辑') b.click()
     })
   })
-  await page.waitForSelector('.ant-modal', { timeout: 15000 })
-  await waitCanvas(page, '.ant-modal')
+  await page.waitForSelector(CREATE_MODAL, { timeout: 15000 })
+  await waitCanvas(page, CREATE_MODAL)
   await sleep(1000)
   report('编辑弹窗打开且 Univer 渲染', true)
-  await clickByText(page, '取消', '.ant-modal-footer')
+  await clickByText(page, '取消', CREATE_MODAL)
   await sleep(800)
 
   // 通过 API 将模板绑定给 运营部 角色

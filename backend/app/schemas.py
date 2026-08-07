@@ -45,6 +45,7 @@ class TemplateCreate(BaseModel):
     col_label_rows: int = Field(default=0, ge=0)
     content_rows: int = Field(default=0, ge=0)
     content_cols: int = Field(default=0, ge=0)
+    content_numeric: bool = False
 
 
 class TemplateUpdate(BaseModel):
@@ -57,6 +58,7 @@ class TemplateUpdate(BaseModel):
     col_label_rows: int | None = Field(default=None, ge=0)
     content_rows: int | None = Field(default=None, ge=0)
     content_cols: int | None = Field(default=None, ge=0)
+    content_numeric: bool | None = None
 
 
 class TemplateRead(BaseModel):
@@ -69,6 +71,9 @@ class TemplateRead(BaseModel):
     col_label_rows: int = 0
     content_rows: int = 0
     content_cols: int = 0
+    content_numeric: bool = False
+    archived: bool = False
+    archived_at: datetime | None = None
 
 
 class TemplateDetail(BaseModel):
@@ -82,6 +87,9 @@ class TemplateDetail(BaseModel):
     col_label_rows: int = 0
     content_rows: int = 0
     content_cols: int = 0
+    content_numeric: bool = False
+    archived: bool = False
+    archived_at: datetime | None = None
 
 
 class TemplateDuplicate(BaseModel):
@@ -124,8 +132,10 @@ class WorkspaceTemplateItem(BaseModel):
     col_label_rows: int = 0
     content_rows: int = 0
     content_cols: int = 0
+    content_numeric: bool = False
     status: str = "none"
     submit_at: datetime | None = None
+    locked: bool = False
 
 
 class WorkspaceTemplateDetail(BaseModel):
@@ -138,9 +148,11 @@ class WorkspaceTemplateDetail(BaseModel):
     col_label_rows: int = 0
     content_rows: int = 0
     content_cols: int = 0
+    content_numeric: bool = False
     status: str = "none"
     submit_at: datetime | None = None
     reject_reason: str | None = None
+    locked: bool = False
     snapshot: dict
 
 
@@ -198,3 +210,16 @@ class WorkbookReview(BaseModel):
 
     action: Literal["approved", "rejected"]
     reject_reason: str | None = None
+
+
+class FillingPeriodRead(BaseModel):
+    """填报期间锁定状态。"""
+
+    period: str
+    locked: bool
+
+
+class FillingPeriodUpsert(BaseModel):
+    """填报期间锁定/解锁请求体。"""
+
+    locked: bool

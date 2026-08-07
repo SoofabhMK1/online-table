@@ -1,4 +1,6 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from datetime import datetime
+
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -30,6 +32,7 @@ async def create_template(
         col_label_rows=body.col_label_rows,
         content_rows=body.content_rows,
         content_cols=body.content_cols,
+        content_numeric=body.content_numeric,
     )
     session.add(template)
     session.commit()
@@ -38,9 +41,15 @@ async def create_template(
 
 
 @router.get("", response_model=list[TemplateRead])
-async def list_templates(session: Session = Depends(get_session)) -> list[Template]:
-    """拉取系统全部模板列表。"""
-    return session.exec(select(Template)).all()
+async def list_templates(
+    archived: bool = Query(default=False),
+    session: Session = Depends(get_session),
+) -> list[Template]:
+    """拉取模板列表。默认只返回未归档模板；`?archived=true` 返回归档模板。"""
+    stmt = select(Template).where(Template.archived == archived)
+    if not archived:
+        stmt = stmt.order_by(Template.id)
+    return session.exec(stmt).all()
 
 
 @router.get("/{template_id}", response_model=TemplateDetail)
@@ -78,6 +87,44 @@ async def update_template(
         template.content_rows = body.content_rows
     if body.content_cols is not None:
         template.content_cols = body.content_cols
+    if body.content_numeric is not None:
+        template.content_numeric = body.content_numeric
+    session.add(template)
+    session.commit()
+    session.refresh(template)
+    return template
+
+
+@router.post("/{template_id}/archive", response_model=TemplateDetail)
+async def archive_template(
+    template_id: int, session: Session = Depends(get_session)
+) -> Template:
+    """归档模板：置为 archived，从工作台/总览/绑定列表隐藏（保留角色绑定与历史数据）。"""
+    template = session.get(Template, template_id)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模板不存在")
+    if template.archived:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模板已归档")
+    template.archived = True
+    template.archived_at = datetime.utcnow()
+    session.add(template)
+    session.commit()
+    session.refresh(template)
+    return template
+
+
+@router.post("/{template_id}/unarchive", response_model=TemplateDetail)
+async def unarchive_template(
+    template_id: int, session: Session = Depends(get_session)
+) -> Template:
+    """恢复归档模板。"""
+    template = session.get(Template, template_id)
+    if template is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="模板不存在")
+    if not template.archived:
+        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="模板未归档")
+    template.archived = False
+    template.archived_at = None
     session.add(template)
     session.commit()
     session.refresh(template)
@@ -107,6 +154,7 @@ async def duplicate_template(
         col_label_rows=source.col_label_rows,
         content_rows=source.content_rows,
         content_cols=source.content_cols,
+        content_numeric=source.content_numeric,
     )
     session.add(new_template)
     session.commit()

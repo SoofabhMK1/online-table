@@ -131,6 +131,7 @@ export default function WorkspacePage() {
                       <Card.Meta title={template.name} />
                       <div>
                         <Tag color={meta.color}>{meta.text}</Tag>
+                        {template.locked && <Tag color="default">已锁定</Tag>}
                       </div>
                     </Space>
                   </Card>

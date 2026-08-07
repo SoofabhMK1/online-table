@@ -27,6 +27,7 @@ import {
 import ChangePasswordModal from '../../components/ChangePasswordModal'
 import { useAuthStore } from '../../store/useAuthStore'
 import { currentPeriod, STATUS_META } from '../../utils/workbookStatus'
+import { validateContentNumeric } from '../../utils/validateContent'
 
 export default function WorkspaceEditPage() {
   const { templateId } = useParams()
@@ -40,6 +41,8 @@ export default function WorkspaceEditPage() {
   const [templateName, setTemplateName] = useState('')
   const [status, setStatus] = useState<'none' | 'draft' | 'submitted' | 'approved' | 'rejected'>('none')
   const [rejectReason, setRejectReason] = useState<string | null>(null)
+  const [locked, setLocked] = useState(false)
+  const [contentNumeric, setContentNumeric] = useState(false)
   const [protectedLabels, setProtectedLabels] = useState<ProtectedLabels | undefined>(
     undefined,
   )
@@ -48,7 +51,7 @@ export default function WorkspaceEditPage() {
   const [submitting, setSubmitting] = useState(false)
   const [changePwdOpen, setChangePwdOpen] = useState(false)
 
-  const readOnly = status === 'submitted' || status === 'approved'
+  const readOnly = locked || status === 'submitted' || status === 'approved'
 
   const load = useCallback(async (tid: number, p: string) => {
     setLoading(true)
@@ -57,6 +60,8 @@ export default function WorkspaceEditPage() {
       setTemplateName(detail.name)
       setStatus(detail.status)
       setRejectReason(detail.reject_reason)
+      setLocked(detail.locked)
+      setContentNumeric(detail.content_numeric)
       setSnapshot(detail.snapshot as unknown as IWorkbookData)
       setProtectedLabels({
         rowLabelCols: detail.row_label_cols,
@@ -80,6 +85,24 @@ export default function WorkspaceEditPage() {
     const data = sheetRef.current?.getWorkbookData()
     if (!data) {
       return
+    }
+    if (action === 'submit' && contentNumeric && protectedLabels) {
+      const invalid = validateContentNumeric(
+        data as unknown as Record<string, unknown>,
+        {
+          rowLabelCols: protectedLabels.rowLabelCols,
+          colLabelRows: protectedLabels.colLabelRows,
+          contentRows: protectedLabels.contentRows,
+          contentCols: protectedLabels.contentCols,
+          contentNumeric,
+        },
+      )
+      if (invalid.length > 0) {
+        message.error(
+          `单元格 ${invalid.map((c) => c.label).join('、')} 需为数字`,
+        )
+        return
+      }
     }
     if (action === 'submit') {
       setSubmitting(true)
@@ -195,20 +218,37 @@ export default function WorkspaceEditPage() {
           type="error"
           showIcon
           style={{ flexShrink: 0, borderRadius: 0 }}
-          message={`填报已被退回：${rejectReason ?? '未填写退回原因'}`}
+          title={`填报已被退回：${rejectReason ?? '未填写退回原因'}`}
           description="请根据退回原因修改后重新提交。"
         />
       )}
-      {readOnly && (
+      {locked && (
+        <Alert
+          type="warning"
+          showIcon
+          style={{ flexShrink: 0, borderRadius: 0 }}
+          title="该周期已被管理员锁定，无法修改"
+          description="如需调整请联系管理员解锁该填报月份。"
+        />
+      )}
+      {readOnly && !locked && (
         <Alert
           type="info"
           showIcon
           style={{ flexShrink: 0, borderRadius: 0 }}
-          message={
+          title={
             status === 'approved'
               ? '该周期填报已通过审核，当前为只读状态'
               : '该周期填报已提交，等待财务审核，当前为只读状态'
           }
+        />
+      )}
+      {contentNumeric && (
+        <Alert
+          type="info"
+          showIcon
+          style={{ flexShrink: 0, borderRadius: 0 }}
+          title="本模板内容区仅允许填写数字，提交时系统会自动校验"
         />
       )}
       <div style={{ flex: 1, position: 'relative', minHeight: 0 }}>
@@ -227,11 +267,12 @@ export default function WorkspaceEditPage() {
         ) : (
           snapshot && (
             <UniverSheet
-              key={`${templateId}-${period}-${status}`}
+              key={`${templateId}-${period}-${status}-${locked}`}
               ref={sheetRef}
               initialSnapshot={snapshot}
               protectedLabels={protectedLabels}
               readOnly={readOnly}
+              disableSheetOps
             />
           )
         )}

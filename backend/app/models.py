@@ -49,6 +49,11 @@ class Template(SQLModel, table=True):
     # 内容区行数 / 列数：用户可填写的区域（从 col_label_rows 行、row_label_cols 列开始）
     content_rows: int = Field(default=0)
     content_cols: int = Field(default=0)
+    # 内容区仅允许数字：提交时校验内容区非空单元格必须为数值
+    content_numeric: bool = Field(default=False)
+    # 归档标记：归档后从工作台/总览/绑定列表隐藏（保留角色绑定与历史数据）
+    archived: bool = Field(default=False, index=True)
+    archived_at: datetime | None = None
     created_at: datetime = Field(default_factory=datetime.utcnow)
 
     role_links: list["RoleTemplateMapping"] = Relationship(
@@ -96,3 +101,14 @@ class RoleWorkbook(SQLModel, table=True):
 
     role: Role = Relationship(back_populates="workbooks")
     template: Template = Relationship(back_populates="workbooks")
+
+
+class FillingPeriod(SQLModel, table=True):
+    """填报期间锁定表。管理员手动锁定某个月（YYYY-MM）后，该月所有部门不可再填报/提交。"""
+
+    __tablename__ = "filling_periods"
+
+    id: int | None = Field(default=None, primary_key=True)
+    period: str = Field(unique=True, index=True)
+    locked: bool = Field(default=False, index=True)
+    created_at: datetime = Field(default_factory=datetime.utcnow)

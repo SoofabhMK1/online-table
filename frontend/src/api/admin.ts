@@ -3,6 +3,7 @@ import type {
   AdminBindingStatus,
   AdminWorkbookDetail,
   AdminWorkbookItem,
+  FillingPeriodItem,
   RoleItem,
   TemplateDetail,
   TemplateDuplicateRequest,
@@ -30,8 +31,18 @@ export async function resetRolePassword(
   )
 }
 
-export async function fetchTemplates(): Promise<TemplateItem[]> {
-  return get<TemplateItem[]>('/templates')
+export async function fetchTemplates(archived = false): Promise<TemplateItem[]> {
+  return get<TemplateItem[]>('/templates', {
+    params: { archived: archived || undefined },
+  })
+}
+
+export async function archiveTemplate(templateId: number): Promise<TemplateDetail> {
+  return post<TemplateDetail>(`/templates/${templateId}/archive`)
+}
+
+export async function unarchiveTemplate(templateId: number): Promise<TemplateDetail> {
+  return post<TemplateDetail>(`/templates/${templateId}/unarchive`)
 }
 
 export async function fetchTemplateDetail(templateId: number): Promise<TemplateDetail> {
@@ -43,6 +54,7 @@ export interface TemplateLabelConfig {
   colLabelRows: number
   contentRows: number
   contentCols: number
+  contentNumeric: boolean
 }
 
 export async function createTemplate(
@@ -59,6 +71,7 @@ export async function createTemplate(
     col_label_rows: labels.colLabelRows,
     content_rows: labels.contentRows,
     content_cols: labels.contentCols,
+    content_numeric: labels.contentNumeric,
   })
 }
 
@@ -77,6 +90,7 @@ export async function updateTemplate(
     col_label_rows: labels.colLabelRows,
     content_rows: labels.contentRows,
     content_cols: labels.contentCols,
+    content_numeric: labels.contentNumeric,
   })
 }
 
@@ -130,4 +144,15 @@ export async function reviewWorkbook(
   body: WorkbookReviewRequest,
 ): Promise<{ id: number; status: string }> {
   return post(`/admin/workbooks/${roleId}/${templateId}/${period}/review`, body)
+}
+
+export async function fetchPeriods(year: number): Promise<FillingPeriodItem[]> {
+  return get<FillingPeriodItem[]>('/admin/periods', { params: { year } })
+}
+
+export async function upsertPeriod(
+  period: string,
+  locked: boolean,
+): Promise<FillingPeriodItem> {
+  return put<FillingPeriodItem>(`/admin/periods/${period}`, { locked })
 }

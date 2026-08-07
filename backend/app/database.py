@@ -30,9 +30,13 @@ def _migrate_templates_columns() -> None:
     inspector = inspect(engine)
     columns = {c["name"] for c in inspector.get_columns("templates")}
     with engine.connect() as conn:
-        for col in ("row_label_cols", "col_label_rows", "content_rows", "content_cols"):
+        for col in ("row_label_cols", "col_label_rows", "content_rows", "content_cols", "content_numeric"):
             if col not in columns:
                 conn.execute(text(f"ALTER TABLE templates ADD COLUMN {col} INTEGER NOT NULL DEFAULT 0"))
+        if "archived" not in columns:
+            conn.execute(text("ALTER TABLE templates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0"))
+        if "archived_at" not in columns:
+            conn.execute(text("ALTER TABLE templates ADD COLUMN archived_at DATETIME"))
         conn.commit()
 
 

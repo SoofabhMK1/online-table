@@ -47,6 +47,8 @@ interface UniverSheetProps {
   protectedLabels?: ProtectedLabels
   /** 整表只读：拦截所有单元格写入（用于已提交/已通过后的只读展示与管理员预览）。 */
   readOnly?: boolean
+  /** 禁止工作表级别操作（新建/删除/重命名/移动/隐藏/复制工作表），用于普通用户填报视图。 */
+  disableSheetOps?: boolean
   /** Univer 实例就绪回调。 */
   onReady?: () => void
 }
@@ -78,8 +80,30 @@ function createBlankWorkbookData(): IWorkbookData {
  * - 挂载时在 useEffect 中初始化 Univer 实例，卸载时调用 univer.dispose() 销毁。
  * - 通过 useImperativeHandle 向上级暴露 getWorkbookData()。
  */
+/** 禁止工作表级别的结构操作：通过工作簿权限点关闭 新建/删除/重命名/移动/隐藏/复制。 */
+async function blockSheetOperations(api: FUniver) {
+  const workbook = api.getActiveWorkbook()
+  if (!workbook) {
+    return
+  }
+  const permission = workbook.getWorkbookPermission()
+  if (!permission) {
+    return
+  }
+  type Point = Parameters<typeof permission.setPoint>[0]
+  const deny = (point: Point) => permission.setPoint(point, false).catch(() => {})
+  await Promise.all([
+    deny('WorkbookCreateSheet' as Point),
+    deny('WorkbookDeleteSheet' as Point),
+    deny('WorkbookRenameSheet' as Point),
+    deny('WorkbookMoveSheet' as Point),
+    deny('WorkbookHideSheet' as Point),
+    deny('WorkbookCopySheet' as Point),
+  ])
+}
+
 const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
-  function UniverSheet({ initialSnapshot, protectedLabels, readOnly, onReady }, ref) {
+  function UniverSheet({ initialSnapshot, protectedLabels, readOnly, disableSheetOps, onReady }, ref) {
     const containerRef = useRef<HTMLDivElement>(null)
     const univerRef = useRef<Univer | null>(null)
     const apiRef = useRef<FUniver | null>(null)
@@ -124,6 +148,11 @@ const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
 
       const snapshot = initialSnapshot ?? createBlankWorkbookData()
       univer.createUnit(UniverInstanceType.UNIVER_SHEET, snapshot)
+
+      // 普通用户填报视图：关闭工作表级别操作（新建/删除/重命名/移动/隐藏/复制）。
+      if (readOnly || disableSheetOps) {
+        blockSheetOperations(api)
+      }
 
       // 内容区与标签保护：仅内容区（矩形）可编辑，其余全部只读。
       // 内容区 = 行 [colLabelRows, colLabelRows+contentRows) × 列 [rowLabelCols, rowLabelCols+contentCols)

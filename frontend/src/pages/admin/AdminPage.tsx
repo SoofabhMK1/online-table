@@ -20,29 +20,38 @@ import {
   Select,
   Space,
   Spin,
+  Switch,
   Table,
   Tabs,
   Tag,
   Transfer,
   Typography,
+  Upload,
   message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
   CopyOutlined,
   DeleteOutlined,
+  DownloadOutlined,
+  InboxOutlined,
   PlusOutlined,
   ReloadOutlined,
   SaveOutlined,
   ThunderboltOutlined,
+  UndoOutlined,
+  UploadOutlined,
 } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import type { IWorkbookData } from '@univerjs/core'
 import UniverSheet, { type UniverSheetHandle } from '../../components/UniverSheet'
 import ChangePasswordModal from '../../components/ChangePasswordModal'
-import { detectLabels } from '../../utils/detectLabels'
+import { parseCellRef, formatCell, formatRange } from '../../utils/cellRef'
+import { computeUsedRange, type UsedRange } from '../../utils/usedRange'
+import { snapshotToXlsx, xlsxToSnapshot } from '../../utils/excelBridge'
 import { useAuthStore } from '../../store/useAuthStore'
 import {
+  archiveTemplate,
   bindRoleTemplates,
   createRole,
   createTemplate,
@@ -50,17 +59,21 @@ import {
   duplicateTemplate,
   fetchAdminWorkbookDetail,
   fetchFillingOverview,
+  fetchPeriods,
   fetchRoleTemplates,
   fetchRoles,
   fetchTemplateDetail,
   fetchTemplates,
   resetRolePassword,
   reviewWorkbook,
+  unarchiveTemplate,
   updateTemplate,
+  upsertPeriod,
 } from '../../api/admin'
 import type {
   AdminBindingStatus,
   AdminWorkbookDetail,
+  FillingPeriodItem,
   RoleItem,
   TemplateItem,
 } from '../../api/types'
@@ -77,15 +90,46 @@ const { Header, Content } = Layout
 interface TemplateFormValues {
   name: string
   year: number
-  rowLabelCols: number
-  colLabelRows: number
-  contentRows: number
-  contentCols: number
+  contentNumeric: boolean
 }
 
 interface OverviewRoleRow {
   id: number
   name: string
+}
+
+/** 根据数据区域起始单元格与使用区域，推算行标签/列标签/内容区。 */
+function deriveLabels(
+  start: { row: number; col: number } | null,
+  used: UsedRange | null,
+): {
+  rowLabelCols: number
+  colLabelRows: number
+  contentRows: number
+  contentCols: number
+  rowLabelRange: string | null
+  colLabelRange: string | null
+  dataRange: string
+} | null {
+  if (!start || !used) return null
+  const rowLabelCols = start.col
+  const colLabelRows = start.row
+  const contentRows = Math.max(0, used.endRow - start.row + 1)
+  const contentCols = Math.max(0, used.endCol - start.col + 1)
+  const rowLabelRange =
+    rowLabelCols > 0 ? formatRange(start.row, 0, used.endRow, start.col - 1) : null
+  const colLabelRange =
+    colLabelRows > 0 ? formatRange(0, 0, start.row - 1, used.endCol) : null
+  const dataRange = formatRange(start.row, start.col, used.endRow, used.endCol)
+  return {
+    rowLabelCols,
+    colLabelRows,
+    contentRows,
+    contentCols,
+    rowLabelRange,
+    colLabelRange,
+    dataRange,
+  }
 }
 
 export default function AdminPage() {
@@ -103,6 +147,8 @@ export default function AdminPage() {
     IWorkbookData | undefined
   >(undefined)
   const [saving, setSaving] = useState(false)
+  const [dataStartCell, setDataStartCell] = useState('')
+  const [usedRange, setUsedRange] = useState<UsedRange | null>(null)
   const sheetRef = useRef<UniverSheetHandle>(null)
   const [form] = Form.useForm<TemplateFormValues>()
 
@@ -138,18 +184,44 @@ export default function AdminPage() {
   const [rejectOpen, setRejectOpen] = useState(false)
   const [rejectReason, setRejectReason] = useState('')
 
+  // 填报期间锁定
+  const [periodYear, setPeriodYear] = useState(new Date().getFullYear())
+  const [periods, setPeriods] = useState<FillingPeriodItem[]>([])
+  const [periodsLoading, setPeriodsLoading] = useState(false)
+  const [periodToggling, setPeriodToggling] = useState<string | null>(null)
+
+  // 模板导入 / 导出 / 归档
+  const [importing, setImporting] = useState(false)
+  const [archivedTemplates, setArchivedTemplates] = useState<TemplateItem[]>([])
+  const [archivedLoading, setArchivedLoading] = useState(false)
+  const [archivingId, setArchivingId] = useState<number | null>(null)
+  const [exportingId, setExportingId] = useState<number | null>(null)
+
   const loadTemplates = useCallback(async () => {
     setTemplateLoading(true)
     try {
-      setTemplates(await fetchTemplates())
+      setTemplates(await fetchTemplates(false))
     } finally {
       setTemplateLoading(false)
+    }
+  }, [])
+
+  const loadArchivedTemplates = useCallback(async () => {
+    setArchivedLoading(true)
+    try {
+      setArchivedTemplates(await fetchTemplates(true))
+    } finally {
+      setArchivedLoading(false)
     }
   }, [])
 
   useEffect(() => {
     loadTemplates()
   }, [loadTemplates])
+
+  useEffect(() => {
+    loadArchivedTemplates()
+  }, [loadArchivedTemplates])
 
   useEffect(() => {
     fetchRoles().then((data) => {
@@ -184,6 +256,39 @@ export default function AdminPage() {
   useEffect(() => {
     loadOverview(overviewPeriod)
   }, [loadOverview, overviewPeriod])
+
+  const loadPeriods = useCallback(async (year: number) => {
+    setPeriodsLoading(true)
+    try {
+      setPeriods(await fetchPeriods(year))
+    } catch {
+      message.error('加载填报期间失败')
+    } finally {
+      setPeriodsLoading(false)
+    }
+  }, [])
+
+  useEffect(() => {
+    loadPeriods(periodYear)
+  }, [loadPeriods, periodYear])
+
+  const handleTogglePeriod = async (period: string, locked: boolean) => {
+    setPeriodToggling(period)
+    try {
+      await upsertPeriod(period, locked)
+      setPeriods((prev) =>
+        prev.map((p) => (p.period === period ? { ...p, locked } : p)),
+      )
+      message.success(locked ? `已锁定 ${period}` : `已解锁 ${period}`)
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      )?.response?.data?.detail
+      message.error(detail ?? '操作失败，请重试')
+    } finally {
+      setPeriodToggling(null)
+    }
+  }
 
   const overviewRoles = useMemo<OverviewRoleRow[]>(() => {
     const map = new Map<number, string>()
@@ -249,29 +354,93 @@ export default function AdminPage() {
   const openCreate = () => {
     setEditingId(null)
     setInitialSnapshot(undefined)
+    setDataStartCell('')
+    setUsedRange(null)
     form.setFieldsValue({
       name: '',
       year: new Date().getFullYear(),
-      rowLabelCols: 0,
-      colLabelRows: 0,
-      contentRows: 0,
-      contentCols: 0,
+      contentNumeric: false,
     })
     setModalOpen(true)
+  }
+
+  const handleImportFile = async (file: File) => {
+    setImporting(true)
+    try {
+      const buffer = await file.arrayBuffer()
+      const snapshot = await xlsxToSnapshot(buffer)
+      setEditingId(null)
+      setInitialSnapshot(snapshot)
+      setDataStartCell('')
+      setUsedRange(computeUsedRange(snapshot))
+      form.setFieldsValue({
+        name: '',
+        year: new Date().getFullYear(),
+        contentNumeric: false,
+      })
+      setModalOpen(true)
+      message.success(`已导入「${file.name}」，请填写数据区域起始单元格后保存`)
+    } catch {
+      message.error('导入 Excel 失败，请确认文件为有效的 .xlsx 模板')
+    } finally {
+      setImporting(false)
+    }
+  }
+
+  const handleExportTemplate = async (template: TemplateItem) => {
+    setExportingId(template.id)
+    try {
+      const detail = await fetchTemplateDetail(template.id)
+      await snapshotToXlsx(
+        detail.snapshot as unknown as IWorkbookData,
+        `${template.name}.xlsx`,
+      )
+      message.success(`已导出「${template.name}.xlsx」`)
+    } catch {
+      message.error('导出模板失败')
+    } finally {
+      setExportingId(null)
+    }
+  }
+
+  const handleArchiveTemplate = async (template: TemplateItem) => {
+    setArchivingId(template.id)
+    try {
+      await archiveTemplate(template.id)
+      message.success(`模板「${template.name}」已归档`)
+      await Promise.all([loadTemplates(), loadArchivedTemplates()])
+    } catch {
+      message.error('归档失败')
+    } finally {
+      setArchivingId(null)
+    }
+  }
+
+  const handleUnarchiveTemplate = async (template: TemplateItem) => {
+    setArchivingId(template.id)
+    try {
+      await unarchiveTemplate(template.id)
+      message.success(`模板「${template.name}」已恢复`)
+      await Promise.all([loadTemplates(), loadArchivedTemplates()])
+    } catch {
+      message.error('恢复失败')
+    } finally {
+      setArchivingId(null)
+    }
   }
 
   const openEdit = async (template: TemplateItem) => {
     try {
       const detail = await fetchTemplateDetail(template.id)
+      const snapshot = detail.snapshot as unknown as IWorkbookData
       setEditingId(template.id)
-      setInitialSnapshot(detail.snapshot as unknown as IWorkbookData)
+      setInitialSnapshot(snapshot)
+      setDataStartCell(formatCell(detail.col_label_rows, detail.row_label_cols))
+      setUsedRange(computeUsedRange(snapshot))
       form.setFieldsValue({
         name: detail.name,
         year: detail.year,
-        rowLabelCols: detail.row_label_cols,
-        colLabelRows: detail.col_label_rows,
-        contentRows: detail.content_rows,
-        contentCols: detail.content_cols,
+        contentNumeric: detail.content_numeric,
       })
       setModalOpen(true)
     } catch {
@@ -279,22 +448,19 @@ export default function AdminPage() {
     }
   }
 
-  const handleAutoDetect = () => {
-    const snapshot = sheetRef.current?.getWorkbookData()
+  /** 从当前表格内容重新检测「使用区域」。notify=true 时给出提示（点按钮时），挂载自动检测时不提示。 */
+  const refreshUsedRange = (notify: boolean) => {
+    const snapshot = sheetRef.current?.getWorkbookData() ?? initialSnapshot
     if (!snapshot) {
       return
     }
-    const guess = detectLabels(snapshot)
-    form.setFieldsValue({
-      rowLabelCols: guess.rowLabelCols,
-      colLabelRows: guess.colLabelRows,
-      contentRows: guess.contentRows,
-      contentCols: guess.contentCols,
-    })
-    message.info(
-      `自动识别结果：行标签 ${guess.rowLabelCols} 列、列标签 ${guess.colLabelRows} 行，` +
-        `内容区 ${guess.contentRows} 行 × ${guess.contentCols} 列（可手动调整）`,
-    )
+    const used = computeUsedRange(snapshot)
+    setUsedRange(used)
+    if (notify) {
+      message.info(
+        `检测到使用区域：${formatRange(used.startRow, used.startCol, used.endRow, used.endCol)}`,
+      )
+    }
   }
 
   const handleSaveTemplate = async () => {
@@ -303,14 +469,27 @@ export default function AdminPage() {
     if (!snapshot) {
       return
     }
-    const labels = {
-      rowLabelCols: values.rowLabelCols ?? 0,
-      colLabelRows: values.colLabelRows ?? 0,
-      contentRows: values.contentRows ?? 0,
-      contentCols: values.contentCols ?? 0,
+    const start = parseCellRef(dataStartCell)
+    if (!start) {
+      message.error('请输入数据区域起始单元格，格式如 B3（大小写均可）')
+      return
     }
-    if (labels.contentRows === 0 || labels.contentCols === 0) {
-      message.warning('尚未配置内容区行数/列数，用户将无法填写任何单元格，请确认')
+    const used = computeUsedRange(snapshot)
+    const derived = deriveLabels(start, used)
+    if (!derived) {
+      return
+    }
+    const labels = {
+      rowLabelCols: derived.rowLabelCols,
+      colLabelRows: derived.colLabelRows,
+      contentRows: derived.contentRows,
+      contentCols: derived.contentCols,
+      contentNumeric: values.contentNumeric ?? false,
+    }
+    if (labels.contentRows <= 0 || labels.contentCols <= 0) {
+      message.warning(
+        '数据区域为空（起始单元格超出使用区域），用户将无法填写任何单元格，请确认',
+      )
     }
     setSaving(true)
     try {
@@ -340,6 +519,11 @@ export default function AdminPage() {
       setSaving(false)
     }
   }
+
+  const derived = useMemo(
+    () => deriveLabels(parseCellRef(dataStartCell), usedRange),
+    [dataStartCell, usedRange],
+  )
 
   const openDuplicate = (template: TemplateItem) => {
     setDuplicateTargetId(template.id)
@@ -426,15 +610,21 @@ export default function AdminPage() {
     { title: '年份', dataIndex: 'year', width: 80 },
     {
       title: '标签区',
-      width: 180,
+      width: 150,
       render: (_, record) =>
         `${record.row_label_cols}列 × ${record.col_label_rows}行`,
     },
     {
+      title: '数字校验',
+      width: 100,
+      render: (_, record) =>
+        record.content_numeric ? <Tag color="gold">仅数字</Tag> : '-',
+    },
+    {
       title: '操作',
-      width: 160,
+      width: 300,
       render: (_, record) => (
-        <Space>
+        <Space size={0} wrap>
           <Button type="link" size="small" onClick={() => openEdit(record)}>
             编辑
           </Button>
@@ -446,7 +636,64 @@ export default function AdminPage() {
           >
             复制
           </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<DownloadOutlined />}
+            loading={exportingId === record.id}
+            onClick={() => handleExportTemplate(record)}
+          >
+            导出
+          </Button>
+          <Popconfirm
+            title={`确认归档模板「${record.name}」？`}
+            description="归档后将从工作台、填报总览与绑定列表中隐藏（历史填报数据保留），可在「归档模板」中恢复。"
+            onConfirm={() => handleArchiveTemplate(record)}
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<InboxOutlined />}
+              loading={archivingId === record.id}
+            >
+              归档
+            </Button>
+          </Popconfirm>
         </Space>
+      ),
+    },
+  ]
+
+  const archivedColumns: TableColumnsType<TemplateItem> = [
+    { title: 'ID', dataIndex: 'id', width: 70 },
+    { title: '模板名称', dataIndex: 'name' },
+    { title: '年份', dataIndex: 'year', width: 80 },
+    {
+      title: '标签区',
+      width: 150,
+      render: (_, record) =>
+        `${record.row_label_cols}列 × ${record.col_label_rows}行`,
+    },
+    {
+      title: '归档时间',
+      dataIndex: 'archived_at',
+      width: 180,
+      render: (value: string | null) => (value ? new Date(value).toLocaleString() : '-'),
+    },
+    {
+      title: '操作',
+      width: 120,
+      render: (_, record) => (
+        <Button
+          type="link"
+          size="small"
+          icon={<UndoOutlined />}
+          loading={archivingId === record.id}
+          onClick={() => handleUnarchiveTemplate(record)}
+        >
+          恢复
+        </Button>
       ),
     },
   ]
@@ -552,16 +799,112 @@ export default function AdminPage() {
     </Space>
   )
 
+  const periodPanel = (
+    <Space orientation="vertical" style={{ width: '100%' }} size="large">
+      <Space wrap>
+        <Typography.Text strong>填报期间锁定</Typography.Text>
+        <InputNumber
+          min={2000}
+          max={2100}
+          value={periodYear}
+          onChange={(v) => setPeriodYear(v ?? new Date().getFullYear())}
+          style={{ width: 100 }}
+        />
+        <Button icon={<ReloadOutlined />} onClick={() => loadPeriods(periodYear)}>
+          刷新
+        </Button>
+        <Typography.Text type="secondary">
+          锁定某月后，该月所有部门不可再保存或提交填报（管理员可随时解锁）。
+        </Typography.Text>
+      </Space>
+      <Spin spinning={periodsLoading}>
+        <Table
+          rowKey="period"
+          size="small"
+          pagination={false}
+          dataSource={periods}
+          columns={[
+            { title: '月份', dataIndex: 'period', width: 120 },
+            {
+              title: '状态',
+              dataIndex: 'locked',
+              width: 120,
+              render: (locked: boolean) =>
+                locked ? (
+                  <Tag color="red">已锁定</Tag>
+                ) : (
+                  <Tag color="green">开放</Tag>
+                ),
+            },
+            {
+              title: '锁定/解锁',
+              width: 160,
+              render: (_, record) => (
+                <Switch
+                  checked={record.locked}
+                  loading={periodToggling === record.period}
+                  onChange={(checked) =>
+                    handleTogglePeriod(record.period, checked)
+                  }
+                  checkedChildren="锁定"
+                  unCheckedChildren="开放"
+                />
+              ),
+            },
+          ]}
+        />
+      </Spin>
+    </Space>
+  )
+
   const templatePanel = (
     <Space orientation="vertical" style={{ width: '100%' }} size="large">
-      <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-        新建模板
-      </Button>
+      <Space wrap>
+        <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+          新建模板
+        </Button>
+        <Upload
+          accept=".xlsx,.xls"
+          showUploadList={false}
+          beforeUpload={(file) => {
+            handleImportFile(file)
+            return false
+          }}
+        >
+          <Button icon={<UploadOutlined />} loading={importing}>
+            导入模板
+          </Button>
+        </Upload>
+        <Typography.Text type="secondary">
+          导入 Excel（仅取第一张工作表，自动处理合并单元格与样式），随后在弹窗中确认名称/年份/标签区。
+        </Typography.Text>
+      </Space>
       <Table
         rowKey="id"
         columns={columns}
         dataSource={templates}
         loading={templateLoading}
+        pagination={false}
+      />
+    </Space>
+  )
+
+  const archivedPanel = (
+    <Space orientation="vertical" style={{ width: '100%' }} size="large">
+      <Space wrap>
+        <Typography.Text strong>归档模板</Typography.Text>
+        <Button icon={<ReloadOutlined />} onClick={loadArchivedTemplates}>
+          刷新
+        </Button>
+        <Typography.Text type="secondary">
+          归档模板已从工作台/填报总览/绑定列表中隐藏，恢复后即可重新使用（原角色绑定保留）。
+        </Typography.Text>
+      </Space>
+      <Table
+        rowKey="id"
+        columns={archivedColumns}
+        dataSource={archivedTemplates}
+        loading={archivedLoading}
         pagination={false}
       />
     </Space>
@@ -656,6 +999,8 @@ export default function AdminPage() {
             { key: 'templates', label: '模板管理', children: templatePanel },
             { key: 'permissions', label: '角色与权限', children: permissionPanel },
             { key: 'overview', label: '填报总览', children: overviewPanel },
+            { key: 'periods', label: '填报期间', children: periodPanel },
+            { key: 'archived', label: '归档模板', children: archivedPanel },
           ]}
         />
       </Content>
@@ -677,33 +1022,45 @@ export default function AdminPage() {
         width={1000}
         forceRender
         footer={
-          previewDetail?.status === 'submitted'
-            ? [
-                <Button key="close" onClick={() => setPreviewOpen(false)}>
-                  关闭
-                </Button>,
-                <Button
-                  key="reject"
-                  danger
-                  loading={reviewing}
-                  onClick={() => setRejectOpen(true)}
-                >
-                  退回
-                </Button>,
-                <Button
-                  key="approve"
-                  type="primary"
-                  loading={reviewing}
-                  onClick={() => handleReview('approved')}
-                >
-                  审核通过
-                </Button>,
-              ]
-            : [
-                <Button key="close" onClick={() => setPreviewOpen(false)}>
-                  关闭
-                </Button>,
-              ]
+          [
+            <Button
+              key="export"
+              icon={<DownloadOutlined />}
+              disabled={!previewDetail}
+              onClick={() =>
+                previewDetail &&
+                snapshotToXlsx(
+                  previewDetail.snapshot as unknown as IWorkbookData,
+                  `${previewDetail.role_name}_${previewDetail.template_name}_${previewDetail.period}.xlsx`,
+                )
+              }
+            >
+              导出 Excel
+            </Button>,
+            <Button key="close" onClick={() => setPreviewOpen(false)}>
+              关闭
+            </Button>,
+            ...(previewDetail?.status === 'submitted'
+              ? [
+                  <Button
+                    key="reject"
+                    danger
+                    loading={reviewing}
+                    onClick={() => setRejectOpen(true)}
+                  >
+                    退回
+                  </Button>,
+                  <Button
+                    key="approve"
+                    type="primary"
+                    loading={reviewing}
+                    onClick={() => handleReview('approved')}
+                  >
+                    审核通过
+                  </Button>,
+                ]
+              : []),
+          ]
         }
       >
         {previewDetail?.status === 'rejected' && previewDetail.reject_reason && (
@@ -811,47 +1168,67 @@ export default function AdminPage() {
             </Form.Item>
           </Space>
           <Space align="end" wrap>
-            <Form.Item
-              name="rowLabelCols"
-              label="行标签占几列"
-              tooltip="行标签在最左侧的哪几列。例如行标签都在 A 列（A1/A2/A3...），则填 1；若 A、B 两列都是行标签则填 2。注意填的是列数，不是标签个数。"
-            >
-              <InputNumber min={0} max={20} style={{ width: 110 }} />
+            <Form.Item label="数据区域起始单元格">
+              <Space.Compact>
+                <Input
+                  value={dataStartCell}
+                  onChange={(e) => setDataStartCell(e.target.value)}
+                  placeholder="如：B3"
+                  style={{ width: 160 }}
+                  onPressEnter={() => refreshUsedRange(true)}
+                />
+                <Button icon={<ThunderboltOutlined />} onClick={() => refreshUsedRange(true)}>
+                  检测使用区域
+                </Button>
+              </Space.Compact>
             </Form.Item>
             <Form.Item
-              name="colLabelRows"
-              label="列标签占几行"
-              tooltip="列标签在最上方的哪几行。例如列标签都在第 1 行（B1/C1/D1...），则填 1；若第 1、2 行都是列标签则填 2。注意填的是行数，不是标签个数。"
+              name="contentNumeric"
+              label="内容区仅允许数字"
+              valuePropName="checked"
+              tooltip="开启后，部门提交填报时内容区的非空单元格必须为数字，否则会被拦截。"
             >
-              <InputNumber min={0} max={20} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item
-              name="contentRows"
-              label="内容区行数"
-              tooltip="用户可填写的行数。例如内容为 3 行则填 3。"
-            >
-              <InputNumber min={0} max={100} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item
-              name="contentCols"
-              label="内容区列数"
-              tooltip="用户可填写的列数。例如内容为 3 列则填 3。"
-            >
-              <InputNumber min={0} max={50} style={{ width: 110 }} />
-            </Form.Item>
-            <Form.Item>
-              <Button icon={<ThunderboltOutlined />} onClick={handleAutoDetect}>
-                自动识别
-              </Button>
+              <Switch />
             </Form.Item>
           </Space>
+          <Card size="small" style={{ marginBottom: 8, background: '#fafafa' }}>
+            <Space orientation="vertical" size={4}>
+              <Typography.Text>
+                使用区域：
+                {usedRange
+                  ? formatRange(usedRange.startRow, usedRange.startCol, usedRange.endRow, usedRange.endCol)
+                  : '（点击「检测使用区域」从表格内容计算）'}
+              </Typography.Text>
+              <Typography.Text>
+                行标签范围：
+                {derived?.rowLabelRange ? (
+                  <Tag>{derived.rowLabelRange}</Tag>
+                ) : (
+                  <Typography.Text type="secondary">无</Typography.Text>
+                )}
+                　列标签范围：
+                {derived?.colLabelRange ? (
+                  <Tag>{derived.colLabelRange}</Tag>
+                ) : (
+                  <Typography.Text type="secondary">无</Typography.Text>
+                )}
+              </Typography.Text>
+              <Typography.Text>
+                数据区域（用户可填写）：{derived ? <Tag color="blue">{derived.dataRange}</Tag> : '（请先填写起始单元格）'}
+              </Typography.Text>
+            </Space>
+          </Card>
           <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
-            只有内容区（标签之后的矩形区域）允许用户填写，其余单元格一律只读。建议先给内容区加上边框后点「自动识别」。
+            系统会根据「使用区域」与数据区域起始单元格自动推算：起始单元格左侧为行标签、上方为列标签、右下为内容区（内容区之外一律只读）。
           </Typography.Text>
         </Form>
         <div style={{ height: '50vh' }}>
           {sheetMounted && (
-            <UniverSheet ref={sheetRef} initialSnapshot={initialSnapshot} />
+            <UniverSheet
+              ref={sheetRef}
+              initialSnapshot={initialSnapshot}
+              onReady={() => refreshUsedRange(false)}
+            />
           )}
         </div>
       </Modal>

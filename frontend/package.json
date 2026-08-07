@@ -27,6 +27,7 @@
     "@univerjs/ui": "^0.25.1",
     "antd": "^6.5.3",
     "axios": "^1.19.0",
+    "exceljs": "^4.4.0",
     "react": "^19.2.8",
     "react-dom": "^19.2.8",
     "react-router-dom": "^7.18.2",

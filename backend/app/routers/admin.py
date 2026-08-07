@@ -6,11 +6,13 @@ from sqlmodel import Session, select
 from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_admin
-from app.models import Role, RoleTemplateMapping, RoleWorkbook, Template, User
+from app.models import FillingPeriod, Role, RoleTemplateMapping, RoleWorkbook, Template, User
 from app.schemas import (
     AdminBindingStatus,
     AdminWorkbookDetail,
     AdminWorkbookRead,
+    FillingPeriodRead,
+    FillingPeriodUpsert,
     PERIOD_PATTERN,
     RoleCreate,
     RoleRead,
@@ -148,10 +150,16 @@ async def bind_templates(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
 
     for template_id in body.template_ids:
-        if session.get(Template, template_id) is None:
+        template = session.get(Template, template_id)
+        if template is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"模板 {template_id} 不存在",
+            )
+        if template.archived:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"模板 {template.name} 已归档，无法绑定",
             )
 
     for link in session.exec(
@@ -204,7 +212,7 @@ async def get_filling_overview(
             & (RoleWorkbook.template_id == Template.id)
             & (RoleWorkbook.period == period),
         )
-        .where(Template.year == year)
+        .where(Template.year == year, Template.archived == False)  # noqa: E712
         .order_by(Role.id, Template.id)
     ).all()
     return [
@@ -303,3 +311,39 @@ async def review_role_workbook(
     session.commit()
     session.refresh(workbook)
     return {"id": workbook.id, "status": workbook.status}
+
+
+@router.get("/periods", response_model=list[FillingPeriodRead])
+async def list_periods(
+    year: int = Query(...),
+    session: Session = Depends(get_session),
+) -> list[FillingPeriodRead]:
+    """获取指定年份全部 12 个月的锁定状态（未配置默认未锁定）。"""
+    records = session.exec(
+        select(FillingPeriod).where(FillingPeriod.period.like(f"{year}-%"))
+    ).all()
+    locked_map = {r.period: r.locked for r in records}
+    return [
+        FillingPeriodRead(period=f"{year}-{month:02d}", locked=locked_map.get(f"{year}-{month:02d}", False))
+        for month in range(1, 13)
+    ]
+
+
+@router.put("/periods/{period}", response_model=FillingPeriodRead)
+async def upsert_period_lock(
+    period: str,
+    body: FillingPeriodUpsert,
+    session: Session = Depends(get_session),
+) -> FillingPeriodRead:
+    """锁定或解锁指定填报周期（幂等 upsert）。"""
+    record = session.exec(
+        select(FillingPeriod).where(FillingPeriod.period == period)
+    ).first()
+    if record is None:
+        record = FillingPeriod(period=period, locked=body.locked)
+        session.add(record)
+    else:
+        record.locked = body.locked
+        session.add(record)
+    session.commit()
+    return FillingPeriodRead(period=period, locked=body.locked)

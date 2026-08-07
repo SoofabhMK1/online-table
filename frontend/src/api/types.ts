@@ -25,6 +25,9 @@ export interface TemplateItem {
   col_label_rows: number
   content_rows: number
   content_cols: number
+  content_numeric: boolean
+  archived: boolean
+  archived_at: string | null
 }
 
 export interface TemplateDetail extends TemplateItem {
@@ -46,13 +49,20 @@ export type WorkbookStatus = 'none' | 'draft' | 'submitted' | 'approved' | 'reje
 export interface WorkspaceTemplateItem extends TemplateItem {
   status: WorkbookStatus
   submit_at: string | null
+  locked: boolean
 }
 
 export interface WorkspaceTemplateDetail extends TemplateItem {
   status: WorkbookStatus
   submit_at: string | null
   reject_reason: string | null
+  locked: boolean
   snapshot: Record<string, unknown>
+}
+
+export interface FillingPeriodItem {
+  period: string
+  locked: boolean
 }
 
 export interface WorkbookSubmit {
