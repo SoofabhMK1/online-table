@@ -1,6 +1,7 @@
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
 from app.database import get_session
@@ -69,20 +70,20 @@ def _iter_content_area(template: Template):
 
 
 def _is_numeric(value) -> bool:
+    """校验单元格值是否为数值（允许千分位逗号与正负号；不允许任意位置逗号）。
+
+    与 frontend/utils/validateContent.ts 保持同逻辑：
+    - 整数 / 浮点（含负数、小数）：通过
+    - 千分位逗号：1,234,567.89 通过；1,2 / 1,2,3 拒绝（避免歧义）
+    - 空串 / 空值：放行（由外层 caller 跳过）
+    """
     if isinstance(value, bool):
         return False
     if isinstance(value, (int, float)):
         return True
     if isinstance(value, str):
-        stripped = value.strip()
-        if not stripped:
-            return True  # 空串视作空值，放行
-        # 允许千分位逗号与正负号
-        try:
-            float(stripped.replace(",", ""))
-            return True
-        except ValueError:
-            return False
+        import re
+        return bool(re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?|-?\d+(\.\d+)?", value.strip()))
     return False
 
 
@@ -230,6 +231,26 @@ async def submit_workbook(
             snapshot=body.snapshot,
         )
         session.add(workbook)
+        try:
+            session.commit()
+        except IntegrityError:
+            # 并发场景下另一请求已创建同 (role, template, period) 行；
+            # 回滚后重新加载并走 update 分支。
+            session.rollback()
+            workbook = _get_workbook(
+                session, current_user.role_id, body.template_id, body.period
+            )
+            if workbook is None:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="并发创建失败，请重试",
+                )
+            if workbook.status in ("submitted", "approved"):
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail="该周期填报已提交/已通过，无法修改",
+                )
+            workbook.snapshot = body.snapshot
     else:
         if workbook.status in ("submitted", "approved"):
             raise HTTPException(
