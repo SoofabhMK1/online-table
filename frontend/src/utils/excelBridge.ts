@@ -71,11 +71,11 @@ function toUniverColor(argb: string | undefined): string | undefined {
 function toExcelArgb(rgb: string): string | undefined {
   if (!rgb) return undefined
   const hex = rgb.trim().match(/^#([0-9a-fA-F]{6})$/)
-  if (hex) return `FF${hex[1].toUpperCase()}`
+  if (hex && hex[1]) return `FF${hex[1].toUpperCase()}`
   const css = rgb.trim().match(/^rgb\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)\s*\)$/)
-  if (css) {
-    const hexPart = [1, 2, 3]
-      .map((i) => Number(css[i]).toString(16).padStart(2, '0'))
+  if (css && css[1] && css[2] && css[3]) {
+    const hexPart = [css[1], css[2], css[3]]
+      .map((c) => Number(c).toString(16).padStart(2, '0'))
       .join('')
       .toUpperCase()
     return `FF${hexPart}`
@@ -106,12 +106,14 @@ function cellStyleToUniver(cell: ExcelJS.Cell): IStyleData | undefined {
   if (border) {
     const bd: NonNullable<IStyleData['bd']> = {}
     for (let i = 0; i < UNIVER_SIDES.length; i++) {
-      const b = border[EXCEL_SIDES[i]]
+      const side = UNIVER_SIDES[i]
+      const excelSide = EXCEL_SIDES[i]
+      const b = side && excelSide ? border[excelSide] : undefined
       if (b && b.style) {
         const s = EXCEL_TO_UNIVER_BORDER[b.style]
-        if (s !== undefined) {
+        if (s !== undefined && side) {
           const rgb = toUniverColor(b.color?.argb)
-          bd[UNIVER_SIDES[i]] = { s, cl: { rgb } }
+          bd[side] = { s, cl: { rgb } }
         }
       }
     }
@@ -158,14 +160,18 @@ function applyUniverStyle(cell: ExcelJS.Cell, us: IStyleData | undefined): void 
   if (us.bd) {
     const border: Partial<Record<'top' | 'bottom' | 'left' | 'right', ExcelJS.Border>> = {}
     for (let i = 0; i < UNIVER_SIDES.length; i++) {
-      const b = us.bd[UNIVER_SIDES[i]]
+      const side = UNIVER_SIDES[i]
+      const b = side ? us.bd[side] : undefined
       if (b && b.s) {
         const style = UNIVER_TO_EXCEL_BORDER[b.s]
         if (style) {
           const argb = b.cl?.rgb ? toExcelArgb(b.cl.rgb) : undefined
-          border[EXCEL_SIDES[i]] = {
-            style: style as ExcelJS.BorderStyle,
-            color: argb ? { argb } : {},
+          const excelSide = EXCEL_SIDES[i]
+          if (excelSide) {
+            border[excelSide] = {
+              style: style as ExcelJS.BorderStyle,
+              color: argb ? { argb } : {},
+            }
           }
         }
       }
@@ -192,7 +198,7 @@ function applyUniverStyle(cell: ExcelJS.Cell, us: IStyleData | undefined): void 
 
 function parseAddress(addr: string): { row: number; col: number } {
   const m = addr.match(/^([A-Za-z]+)(\d+)$/)
-  if (!m) return { row: 0, col: 0 }
+  if (!m || !m[1] || !m[2]) return { row: 0, col: 0 }
   let col = 0
   for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64)
   return { row: Number(m[2]) - 1, col: col - 1 }
@@ -207,6 +213,7 @@ function decodeMerge(entry: string | { top: number; left: number; bottom: number
 } {
   if (typeof entry === 'string') {
     const [start, end] = entry.split(':')
+    if (!start) return { startRow: 0, startColumn: 0, endRow: 0, endColumn: 0 }
     const s = parseAddress(start)
     const e = end ? parseAddress(end) : s
     return { startRow: s.row, startColumn: s.col, endRow: e.row, endColumn: e.col }
@@ -298,8 +305,10 @@ export async function xlsxToSnapshot(arrayBuffer: ArrayBuffer): Promise<IWorkboo
       const entry: ICellData = { v: converted.v, t: converted.t }
       const styleId = internStyle(cellStyleToUniver(cell))
       if (styleId !== undefined) entry.s = styleId
-      cellData[String(r)] = cellData[String(r)] ?? {}
-      cellData[String(r)][String(c)] = entry
+      const rowKey = String(r)
+      const colKey = String(c)
+      cellData[rowKey] = cellData[rowKey] ?? {}
+      cellData[rowKey]![colKey] = entry
       maxRow = Math.max(maxRow, r)
       maxCol = Math.max(maxCol, c)
     })

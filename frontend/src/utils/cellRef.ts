@@ -11,9 +11,12 @@ export interface CellRef {
 export function parseCellRef(ref: string): CellRef | null {
   const m = ref.trim().match(/^([A-Za-z]+)(\d+)$/)
   if (!m) return null
+  const letters = m[1]
+  const digits = m[2]
+  if (!letters || !digits) return null
   let col = 0
-  for (const ch of m[1].toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64)
-  return { row: Number(m[2]) - 1, col: col - 1 }
+  for (const ch of letters.toUpperCase()) col = col * 26 + (ch.charCodeAt(0) - 64)
+  return { row: Number(digits) - 1, col: col - 1 }
 }
 
 /** 0 起始列号 → Excel 列字母（0 → A）。 */

@@ -272,8 +272,9 @@ export default function AdminPage() {
   useEffect(() => {
     fetchRoles().then((data) => {
       setRoles(data)
-      if (data.length > 0) {
-        setSelectedRoleId(data[0].id)
+      const first = data[0]
+      if (first) {
+        setSelectedRoleId(first.id)
       }
     })
   }, [])
