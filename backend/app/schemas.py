@@ -256,10 +256,18 @@ class WorkbookSubmit(BaseModel):
 
 
 class AdminBindingStatus(BaseModel):
-    """管理员视角：部门 × 模板 × 周期 的填报状态（含未填报项）。"""
+    """管理员视角：角色 × 模板 × 周期 的填报状态（含未填报项），带组织分类。"""
 
     role_id: int
     role_name: str
+    segment_id: int | None = None
+    segment_name: str | None = None
+    entity_id: int | None = None
+    entity_name: str | None = None
+    department_id: int | None = None
+    department_name: str | None = None
+    function_tag_id: int | None = None
+    function_tag_name: str | None = None
     template_id: int
     template_name: str
     status: str = "none"

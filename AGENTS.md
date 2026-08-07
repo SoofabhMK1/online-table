@@ -73,13 +73,14 @@ frontend/
     │   ├── ProtectedRoute.tsx / AdminRoute.tsx / RootRedirect.tsx
     ├── pages/
     │   ├── LoginPage.tsx
-    │   ├── admin/AdminPage.tsx      # 模板管理(导入/导出/复制/归档) + 角色管理(弹窗级联创建/编辑) + 组织架构 + 模板权限 + 填报总览(汇总筛选/审核/导出) + 填报期间 + 归档模板
+    │   ├── admin/AdminPage.tsx      # 模板管理(导入/导出/复制/归档) + 角色管理(弹窗级联创建/编辑) + 组织架构 + 模板权限 + 填报总览(树形分组/级联筛选/审核/导出) + 填报期间 + 归档模板
     │   └── workspace/WorkspacePage.tsx(月份选择+状态) / WorkspaceEditPage.tsx(草稿/提交)
     └── utils/
         ├── cellRef.ts            # Excel 单元格引用解析/格式化（A1、B3 等）
         ├── usedRange.ts          # 计算工作表使用区域（类似 Excel UsedRange，含内容/样式/合并单元格）
         ├── workbookStatus.ts     # 填报状态文案/颜色 + 周期(YYYY-MM) 工具函数
         ├── validateContent.ts    # 内容区数字校验（与后端同逻辑，提交前即时提示）
+        ├── overviewTree.ts       # 填报总览树形分组（板块/主体/部门/角色）+ 状态统计
         └── excelBridge.ts        # Univer 快照 ⇄ .xlsx（exceljs：值/合并单元格/样式/列宽行高，导入仅取第一张 sheet）
 ```
 
@@ -118,7 +119,7 @@ frontend/
   - `POST/PUT/DELETE /admin/org/segments`、`/org/entities`、`/org/departments`、`/org/tags` → 组织架构与职能标签增删改（有子级/被引用时拒绝删除）
   - `GET /admin/roles/{id}/templates` → 该角色已绑定模板 id 列表
   - `POST /admin/roles/{id}/templates` {template_ids} → 全量覆盖绑定
-  - `GET /admin/overview?period=YYYY-MM` → 填报总览：该年份所有 部门×模板 绑定及周期状态（含未填报）
+  - `GET /admin/overview?period=YYYY-MM` → 填报总览：该年份所有 角色×模板 绑定及周期状态（含未填报），带组织分类（板块/主体/部门/职能）
   - `GET /admin/workbooks?period=YYYY-MM&status=` → 指定周期各部门填报记录（可按状态筛选）
   - `GET /admin/workbooks/{role_id}/{template_id}/{period}` → 某部门某周期已填写的快照（管理员预览）
   - `POST /admin/workbooks/{role_id}/{template_id}/{period}/review` {action: approved|rejected, reject_reason?} → 审核（仅对 submitted 生效，退回需填原因）

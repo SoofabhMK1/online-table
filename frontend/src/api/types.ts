@@ -125,6 +125,14 @@ export interface WorkbookSubmit {
 export interface AdminBindingStatus {
   role_id: number
   role_name: string
+  segment_id: number | null
+  segment_name: string | null
+  entity_id: number | null
+  entity_name: string | null
+  department_id: number | null
+  department_name: string | null
+  function_tag_id: number | null
+  function_tag_name: string | null
   template_id: number
   template_name: string
   status: WorkbookStatus

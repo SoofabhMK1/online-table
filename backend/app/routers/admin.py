@@ -638,6 +638,22 @@ async def get_filling_overview(
         AdminBindingStatus(
             role_id=role.id,
             role_name=role.name,
+            segment_id=role.segment_id,
+            segment_name=session.get(BusinessSegment, role.segment_id).name
+            if role.segment_id
+            else None,
+            entity_id=role.entity_id,
+            entity_name=session.get(OrgEntity, role.entity_id).name
+            if role.entity_id
+            else None,
+            department_id=role.department_id,
+            department_name=session.get(OrgDepartment, role.department_id).name
+            if role.department_id
+            else None,
+            function_tag_id=role.function_tag_id,
+            function_tag_name=session.get(FunctionTag, role.function_tag_id).name
+            if role.function_tag_id
+            else None,
             template_id=template.id,
             template_name=template.name,
             status=workbook.status if workbook else "none",

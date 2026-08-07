@@ -50,6 +50,13 @@ import OrgManager from '../../components/OrgManager'
 import { parseCellRef, formatCell, formatRange } from '../../utils/cellRef'
 import { computeUsedRange, type UsedRange } from '../../utils/usedRange'
 import { snapshotToXlsx, xlsxToSnapshot } from '../../utils/excelBridge'
+import {
+  buildOverviewTree,
+  countStatus,
+  formatStatusSummary,
+  totalItems,
+  type OverviewRow,
+} from '../../utils/overviewTree'
 import { useAuthStore } from '../../store/useAuthStore'
 import {
   archiveTemplate,
@@ -204,9 +211,12 @@ export default function AdminPage() {
   const [overviewPeriod, setOverviewPeriod] = useState<string>(currentPeriod())
   const [overview, setOverview] = useState<AdminBindingStatus[]>([])
   const [overviewLoading, setOverviewLoading] = useState(false)
-  const [overviewRoleFilter, setOverviewRoleFilter] = useState<number | undefined>(undefined)
+  const [ovSegmentId, setOvSegmentId] = useState<number | null>(null)
+  const [ovEntityId, setOvEntityId] = useState<number | null>(null)
+  const [ovDepartmentId, setOvDepartmentId] = useState<number | null>(null)
+  const [ovRoleSearch, setOvRoleSearch] = useState('')
+  const [ovFunctionTagId, setOvFunctionTagId] = useState<number | null>(null)
   const [overviewStatusFilter, setOverviewStatusFilter] = useState<WorkbookStatus | undefined>(undefined)
-  const [overviewTemplateSearch, setOverviewTemplateSearch] = useState('')
   const [previewOpen, setPreviewOpen] = useState(false)
   const [previewMounted, setPreviewMounted] = useState(false)
   const [previewCell, setPreviewCell] = useState<AdminBindingStatus | null>(null)
@@ -339,12 +349,6 @@ export default function AdminPage() {
     }
   }
 
-  const overviewRoleOptions = useMemo(() => {
-    const map = new Map<number, string>()
-    overview.forEach((o) => map.set(o.role_id, o.role_name))
-    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name }))
-  }, [overview])
-
   const overviewStatusCounts = useMemo(() => {
     const counts: Record<WorkbookStatus, number> = {
       none: 0,
@@ -359,15 +363,61 @@ export default function AdminPage() {
     return counts
   }, [overview])
 
+  // 筛选选项：板块 / 主体（随板块联动）/ 部门（随板块+主体联动）/ 职能
+  const ovSegmentOptions = useMemo(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => {
+      if (o.segment_id != null) map.set(o.segment_id, o.segment_name ?? '')
+    })
+    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name || '未命名板块' }))
+  }, [overview])
+
+  const ovEntityOptions = useMemo(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => {
+      if (o.entity_id != null && (ovSegmentId == null || o.segment_id === ovSegmentId)) {
+        map.set(o.entity_id, o.entity_name ?? '')
+      }
+    })
+    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name || '未命名主体' }))
+  }, [overview, ovSegmentId])
+
+  const ovDepartmentOptions = useMemo(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => {
+      if (
+        o.department_id != null &&
+        (ovSegmentId == null || o.segment_id === ovSegmentId) &&
+        (ovEntityId == null || o.entity_id === ovEntityId)
+      ) {
+        map.set(o.department_id, o.department_name ?? '')
+      }
+    })
+    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name || '未命名部门' }))
+  }, [overview, ovSegmentId, ovEntityId])
+
+  const ovFunctionTagOptions = useMemo(() => {
+    const map = new Map<number, string>()
+    overview.forEach((o) => {
+      if (o.function_tag_id != null) map.set(o.function_tag_id, o.function_tag_name ?? '')
+    })
+    return Array.from(map.entries()).map(([id, name]) => ({ value: id, label: name || '未命名职能' }))
+  }, [overview])
+
   const filteredOverview = useMemo(() => {
-    const keyword = overviewTemplateSearch.trim().toLowerCase()
+    const keyword = ovRoleSearch.trim().toLowerCase()
     return overview.filter((o) => {
-      if (overviewRoleFilter !== undefined && o.role_id !== overviewRoleFilter) return false
+      if (ovSegmentId != null && o.segment_id !== ovSegmentId) return false
+      if (ovEntityId != null && o.entity_id !== ovEntityId) return false
+      if (ovDepartmentId != null && o.department_id !== ovDepartmentId) return false
+      if (ovFunctionTagId != null && o.function_tag_id !== ovFunctionTagId) return false
       if (overviewStatusFilter !== undefined && o.status !== overviewStatusFilter) return false
-      if (keyword && !o.template_name.toLowerCase().includes(keyword)) return false
+      if (keyword && !o.role_name.toLowerCase().includes(keyword)) return false
       return true
     })
-  }, [overview, overviewRoleFilter, overviewStatusFilter, overviewTemplateSearch])
+  }, [overview, ovSegmentId, ovEntityId, ovDepartmentId, ovFunctionTagId, overviewStatusFilter, ovRoleSearch])
+
+  const overviewTreeRows = useMemo(() => buildOverviewTree(filteredOverview), [filteredOverview])
 
   const openPreview = async (cell: AdminBindingStatus) => {
     if (cell.status === 'none') {
@@ -851,34 +901,86 @@ export default function AdminPage() {
     },
   ]
 
-  const overviewTableColumns: TableColumnsType<AdminBindingStatus> = [
-    { title: '部门', dataIndex: 'role_name', width: 140 },
-    { title: '模板', dataIndex: 'template_name' },
+  const overviewTableColumns: TableColumnsType<OverviewRow> = [
+    {
+      title: '组织（板块/主体/部门）',
+      key: 'org',
+      width: 260,
+      render: (_, row) => {
+        if (row.type === 'dept') {
+          const parts = [row.segmentName, row.entityName, row.departmentName].filter(Boolean)
+          return parts.length ? parts.join(' / ') : (
+            <Typography.Text type="secondary">未分类</Typography.Text>
+          )
+        }
+        return ''
+      },
+    },
+    {
+      title: '角色',
+      key: 'role',
+      width: 140,
+      render: (_, row) =>
+        row.type === 'item' ? row.item.role_name : row.type === 'role' ? row.roleName : '',
+    },
+    {
+      title: '职能',
+      key: 'tag',
+      width: 110,
+      render: (_, row) => {
+        const tag =
+          row.type === 'item'
+            ? row.item.function_tag_name
+            : row.type === 'role'
+              ? row.functionTagName
+              : null
+        return tag ? <Tag color="blue">{tag}</Tag> : '-'
+      },
+    },
+    {
+      title: '模板',
+      key: 'tpl',
+      width: 160,
+      render: (_, row) => {
+        if (row.type === 'item') return row.item.template_name
+        return `${totalItems(countStatus(row.children))} 个模板`
+      },
+    },
     {
       title: '状态',
-      dataIndex: 'status',
-      width: 110,
-      render: (status: WorkbookStatus) => {
-        const meta = STATUS_META[status]
-        return <Tag color={meta.color}>{meta.text}</Tag>
+      key: 'status',
+      width: 200,
+      render: (_, row) => {
+        if (row.type === 'item') {
+          const meta = STATUS_META[row.item.status]
+          return <Tag color={meta.color}>{meta.text}</Tag>
+        }
+        return (
+          <Typography.Text type="secondary">
+            {formatStatusSummary(countStatus(row.children))}
+          </Typography.Text>
+        )
       },
     },
     {
       title: '更新时间',
-      dataIndex: 'updated_at',
+      key: 'updated',
       width: 180,
-      render: (value: string | null) => (value ? new Date(value).toLocaleString() : '-'),
+      render: (_, row) =>
+        row.type === 'item' && row.item.updated_at
+          ? new Date(row.item.updated_at).toLocaleString()
+          : '-',
     },
     {
       title: '操作',
+      key: 'action',
       width: 100,
-      render: (_, record) => {
-        if (record.status === 'none') {
-          return '-'
-        }
+      render: (_, row) => {
+        if (row.type !== 'item') return ''
+        if (row.item.status === 'none') return '-'
         return (
-          <Button type="link" size="small" onClick={() => openPreview(record)}>
-            {record.status === 'submitted' ? '审核' : '预览'}
+          <Button type="link" size="small" onClick={() => openPreview(row.item)}>
+            {row.item.status === 'submitted' ? '审核' : '预览'}
           </Button>
         )
       },
@@ -923,32 +1025,60 @@ export default function AdminPage() {
         ))}
         <Select
           allowClear
-          placeholder="筛选部门"
-          style={{ width: 180 }}
-          value={overviewRoleFilter}
-          onChange={setOverviewRoleFilter}
-          options={overviewRoleOptions}
+          placeholder="业务板块"
+          style={{ width: 150 }}
+          value={ovSegmentId ?? undefined}
+          onChange={(v) => {
+            setOvSegmentId(v ?? null)
+            setOvEntityId(null)
+            setOvDepartmentId(null)
+          }}
+          options={ovSegmentOptions}
+        />
+        <Select
+          allowClear
+          placeholder="主体"
+          style={{ width: 150 }}
+          value={ovEntityId ?? undefined}
+          onChange={(v) => {
+            setOvEntityId(v ?? null)
+            setOvDepartmentId(null)
+          }}
+          options={ovEntityOptions}
+        />
+        <Select
+          allowClear
+          placeholder="部门"
+          style={{ width: 150 }}
+          value={ovDepartmentId ?? undefined}
+          onChange={(v) => setOvDepartmentId(v ?? null)}
+          options={ovDepartmentOptions}
         />
         <Input.Search
-          placeholder="搜索模板名称"
           allowClear
-          style={{ width: 220 }}
-          value={overviewTemplateSearch}
-          onChange={(e) => setOverviewTemplateSearch(e.target.value)}
+          placeholder="搜索角色名"
+          style={{ width: 170 }}
+          value={ovRoleSearch}
+          onChange={(e) => setOvRoleSearch(e.target.value)}
+        />
+        <Select
+          allowClear
+          placeholder="职能"
+          style={{ width: 130 }}
+          value={ovFunctionTagId ?? undefined}
+          onChange={(v) => setOvFunctionTagId(v ?? null)}
+          options={ovFunctionTagOptions}
         />
       </Space>
       <Table
-        rowKey={(record) => `${record.role_id}-${record.template_id}`}
+        rowKey="key"
         columns={overviewTableColumns}
-        dataSource={filteredOverview}
+        dataSource={overviewTreeRows}
         loading={overviewLoading}
         size="small"
-        pagination={{
-          pageSize: 10,
-          showSizeChanger: true,
-          showTotal: (total) => `共 ${total} 条`,
-        }}
-        scroll={{ x: 900 }}
+        pagination={false}
+        scroll={{ x: 1300 }}
+        expandable={{ defaultExpandAllRows: false }}
       />
     </Space>
   )
