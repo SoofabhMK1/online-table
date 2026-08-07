@@ -4,6 +4,7 @@ from sqlmodel import Session, select
 from app.database import get_session
 from app.dependencies import get_current_user
 from app.models import Role, User
+from app.rate_limit import get_login_rate_limiter
 from app.schemas import (
     ChangeAccountRequest,
     ChangePasswordRequest,
@@ -18,14 +19,24 @@ router = APIRouter(prefix="/api/auth", tags=["auth"])
 @router.post("/login", response_model=TokenResponse)
 async def login(body: LoginRequest, session: Session = Depends(get_session)) -> TokenResponse:
     """接收用户名密码，校验成功后签发 JWT Token。"""
+    limiter = get_login_rate_limiter()
+    allowed, retry_after = limiter.check(body.username)
+    if not allowed:
+        raise HTTPException(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            detail=f"登录失败次数过多，请 {retry_after} 秒后再试",
+            headers={"Retry-After": str(retry_after)},
+        )
     user = session.exec(
         select(User).where(User.username == body.username)
     ).first()
     if user is None or not verify_password(body.password, user.password_hash):
+        limiter.record_failure(body.username)
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="用户名或密码错误",
         )
+    limiter.reset(body.username)
     role = session.get(Role, user.role_id)
     token = create_access_token(user.id, user.role_id, role.name)
     return TokenResponse(
