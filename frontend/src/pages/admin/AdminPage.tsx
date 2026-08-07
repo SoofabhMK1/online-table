@@ -186,6 +186,8 @@ export default function AdminPage() {
   const [editingRole, setEditingRole] = useState<RoleItem | null>(null)
   const [savingRole, setSavingRole] = useState(false)
   const [roleForm] = Form.useForm<RoleFormValues>()
+  const [deleteRoleTarget, setDeleteRoleTarget] = useState<RoleItem | null>(null)
+  const [deleteRoleNameInput, setDeleteRoleNameInput] = useState('')
   const watchedSegmentId = Form.useWatch('segmentId', roleForm)
   const watchedEntityId = Form.useWatch('entityId', roleForm)
   const roleEntityOptions = useMemo(
@@ -728,17 +730,21 @@ export default function AdminPage() {
     }
   }
 
-  const handleDeleteRole = async (roleId: number) => {
+  const handleDeleteRole = async (roleId: number, confirmName: string) => {
     try {
-      await deleteRole(roleId)
-      message.success('角色已删除')
+      await deleteRole(roleId, confirmName)
+      message.success('角色已删除（默认账号、模板绑定、填报历史已一并清理）')
       const data = await fetchRoles()
       setRoles(data)
       if (selectedRoleId === roleId) {
         setSelectedRoleId(data[0]?.id ?? null)
       }
-    } catch {
-      message.error('删除失败：该角色下存在用户，无法删除')
+      setDeleteRoleTarget(null)
+    } catch (error) {
+      const detail = (
+        error as { response?: { data?: { detail?: string } } }
+      )?.response?.data?.detail
+      message.error(detail ?? '删除失败')
     }
   }
 
@@ -888,14 +894,15 @@ export default function AdminPage() {
               重置密码
             </Button>
           </Popconfirm>
-          <Popconfirm
-            title="确认删除该角色？"
-            onConfirm={() => handleDeleteRole(record.id)}
+          <Button
+            type="link"
+            danger
+            size="small"
+            icon={<DeleteOutlined />}
+            onClick={() => setDeleteRoleTarget(record)}
           >
-            <Button type="link" danger size="small" icon={<DeleteOutlined />}>
-              删除
-            </Button>
-          </Popconfirm>
+            删除
+          </Button>
         </Space>
       ),
     },
@@ -1364,6 +1371,50 @@ export default function AdminPage() {
             />
           </Form.Item>
         </Form>
+      </Modal>
+
+      <Modal
+        title={`删除角色「${deleteRoleTarget?.name ?? ''}」`}
+        open={deleteRoleTarget !== null}
+        onCancel={() => {
+          setDeleteRoleTarget(null)
+          setDeleteRoleNameInput('')
+        }}
+        onOk={() => {
+          if (deleteRoleTarget) {
+            void handleDeleteRole(deleteRoleTarget.id, deleteRoleNameInput)
+          }
+        }}
+        okText="确认删除"
+        okButtonProps={{
+          danger: true,
+          disabled:
+            !deleteRoleTarget ||
+            deleteRoleNameInput.trim() !== deleteRoleTarget.name,
+        }}
+        cancelText="取消"
+        destroyOnHidden
+        width={460}
+      >
+        <Typography.Paragraph type="danger" style={{ marginTop: 8 }}>
+          此操作将级联清理以下数据，且不可恢复：
+        </Typography.Paragraph>
+        <ul style={{ marginTop: 0, paddingLeft: 20 }}>
+          <li>该角色的所有模板绑定</li>
+          <li>该角色的全部填报历史（草稿/已提交/已通过/已退回）</li>
+          <li>该角色的默认账号</li>
+        </ul>
+        <Typography.Paragraph>
+          请输入角色名称「
+          <Typography.Text strong>{deleteRoleTarget?.name}</Typography.Text>
+          」以确认删除：
+        </Typography.Paragraph>
+        <Input
+          value={deleteRoleNameInput}
+          onChange={(e) => setDeleteRoleNameInput(e.target.value)}
+          placeholder={deleteRoleTarget?.name}
+          allowClear
+        />
       </Modal>
 
       <Modal

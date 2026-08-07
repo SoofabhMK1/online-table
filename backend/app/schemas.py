@@ -149,6 +149,16 @@ class RoleUpdate(BaseModel):
     function_tag_id: int | None = None
 
 
+class RoleDeleteConfirm(BaseModel):
+    """删除角色二次确认请求体：管理员必须回传角色名以确认删除。
+
+    级联删除该角色的：模板绑定 (role_template_mapping)、填报历史 (role_workbooks)、
+    默认账号 (users 中 is_default=True 的账号)。
+    """
+
+    confirm_name: str = Field(min_length=1, max_length=128)
+
+
 class OrgDepartmentRead(BaseModel):
     """部门。"""
 
@@ -304,10 +314,17 @@ class AdminWorkbookDetail(BaseModel):
 
 
 class WorkbookReview(BaseModel):
-    """管理员审核请求体。"""
+    """管理员审核请求体。action=rejected 时 reject_reason 必须为非空字符串。"""
 
     action: Literal["approved", "rejected"]
     reject_reason: str | None = None
+
+    def validated_reason(self) -> str | None:
+        """返回 trimmed 后的退回原因；rejected 时若为空则抛出 ValueError。"""
+        reason = (self.reject_reason or "").strip()
+        if self.action == "rejected" and not reason:
+            raise ValueError("退回时必须填写原因")
+        return reason or None
 
 
 class FillingPeriodRead(BaseModel):

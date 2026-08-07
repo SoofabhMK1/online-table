@@ -32,8 +32,8 @@ export async function updateRole(
   return put<RoleItem>(`/admin/roles/${roleId}`, payload)
 }
 
-export async function deleteRole(roleId: number): Promise<void> {
-  return del(`/admin/roles/${roleId}`)
+export async function deleteRole(roleId: number, confirmName: string): Promise<void> {
+  return del(`/admin/roles/${roleId}`, { data: { confirm_name: confirmName } })
 }
 
 export async function resetRolePassword(
