@@ -38,8 +38,8 @@ export async function deleteRole(roleId: number, confirmName: string): Promise<v
 
 export async function resetRolePassword(
   roleId: number,
-): Promise<{ username: string; password: string }> {
-  return post<{ username: string; password: string }>(
+): Promise<{ username: string; message: string }> {
+  return post<{ username: string; message: string }>(
     `/admin/roles/${roleId}/reset-password`,
   )
 }

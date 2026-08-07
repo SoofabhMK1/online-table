@@ -31,7 +31,7 @@ interface RolesState {
   /** 删除角色后自动 refetch。 */
   remove: (id: number, confirmName: string) => Promise<void>
   /** 重置默认账号密码（不需 refetch）。 */
-  resetPassword: (id: number) => Promise<{ username: string; password: string }>
+  resetPassword: (id: number) => Promise<{ username: string; message: string }>
 }
 
 export const useRolesStore = create<RolesState>((set, get) => ({

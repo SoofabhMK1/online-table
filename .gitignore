@@ -36,3 +36,5 @@ Thumbs.db
 # 测试产物
 *.tmp
 *.rej
+*.xlsx
+import_test.xlsx

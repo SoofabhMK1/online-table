@@ -1,9 +1,13 @@
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
+import json
+
+from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_user
 from app.models import FillingPeriod, RoleTemplateMapping, RoleWorkbook, Template, User
@@ -15,6 +19,16 @@ from app.schemas import (
 )
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
+
+
+def _check_snapshot_size(snapshot: dict) -> None:
+    """序列化后超 MAX_SNAPSHOT_BYTES 即拒绝（413）。"""
+    size = len(json.dumps(snapshot, ensure_ascii=False, default=str).encode("utf-8"))
+    if size > settings.MAX_SNAPSHOT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"快照过大（{size} 字节 > {settings.MAX_SNAPSHOT_BYTES}），请精简表格内容",
+        )
 
 
 def _is_period_locked(session: Session, period: str) -> bool:
@@ -130,6 +144,8 @@ def _get_workbook(
 @router.get("/templates", response_model=list[WorkspaceTemplateItem])
 async def list_accessible_templates(
     period: str = Query(..., pattern=PERIOD_PATTERN),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     current_user: User = Depends(get_current_user),
     session: Session = Depends(get_session),
 ) -> list[WorkspaceTemplateItem]:
@@ -153,6 +169,8 @@ async def list_accessible_templates(
             Template.archived == False,  # noqa: E712
         )
         .order_by(Template.id)
+        .offset(offset)
+        .limit(limit)
     ).all()
     locked = _is_period_locked(session, period)
     return [
@@ -218,6 +236,7 @@ async def submit_workbook(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="该周期已被管理员锁定，无法修改",
         )
+    _check_snapshot_size(body.snapshot)
     if body.action == "submit":
         _validate_content_numeric(body.snapshot, template)
 

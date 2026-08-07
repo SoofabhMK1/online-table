@@ -149,10 +149,8 @@ export default function RolePanel() {
 
   const handleResetPassword = async (roleId: number) => {
     try {
-      const res = await resetPassword(roleId)
-      message.success(
-        `已重置账号「${res.username}」的密码为初始密码「${res.password}」`,
-      )
+      await resetPassword(roleId)
+      message.success('密码已重置为统一初始密码')
     } catch {
       message.error('重置密码失败')
     }

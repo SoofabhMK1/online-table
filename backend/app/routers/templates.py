@@ -1,8 +1,10 @@
+import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlmodel import Session, select
 
+from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_admin
 from app.models import RoleTemplateMapping, Template
@@ -19,11 +21,22 @@ router = APIRouter(
 )
 
 
+def _check_snapshot_size(snapshot: dict) -> None:
+    """序列化后超 MAX_SNAPSHOT_BYTES 即拒绝（413），避免恶意大 JSON 触发 OOM。"""
+    size = len(json.dumps(snapshot, ensure_ascii=False, default=str).encode("utf-8"))
+    if size > settings.MAX_SNAPSHOT_BYTES:
+        raise HTTPException(
+            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            detail=f"快照过大（{size} 字节 > {settings.MAX_SNAPSHOT_BYTES}），请精简模板内容",
+        )
+
+
 @router.post("", response_model=TemplateDetail, status_code=status.HTTP_201_CREATED)
 async def create_template(
     body: TemplateCreate, session: Session = Depends(get_session)
 ) -> Template:
     """新建模板，snapshot 作为 dict 直接落入 SQLite JSON 字段。"""
+    _check_snapshot_size(body.snapshot)
     template = Template(
         name=body.name,
         year=body.year,
@@ -43,12 +56,19 @@ async def create_template(
 @router.get("", response_model=list[TemplateRead])
 async def list_templates(
     archived: bool = Query(default=False),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[Template]:
-    """拉取模板列表。默认只返回未归档模板；`?archived=true` 返回归档模板。"""
+    """拉取模板列表（分页）。默认只返回未归档模板；`?archived=true` 返回归档模板。
+
+    - limit: 单页条数，1-1000，默认 200
+    - offset: 偏移量，≥ 0，默认 0
+    """
     stmt = select(Template).where(Template.archived == archived)
     if not archived:
         stmt = stmt.order_by(Template.id)
+    stmt = stmt.offset(offset).limit(limit)
     return session.exec(stmt).all()
 
 
@@ -78,6 +98,7 @@ async def update_template(
     if body.year is not None:
         template.year = body.year
     if body.snapshot is not None:
+        _check_snapshot_size(body.snapshot)
         template.snapshot = body.snapshot
     if body.row_label_cols is not None:
         template.row_label_cols = body.row_label_cols

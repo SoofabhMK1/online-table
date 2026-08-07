@@ -269,7 +269,11 @@ async def update_role(
 async def reset_role_password(
     role_id: int, session: Session = Depends(get_session)
 ) -> dict:
-    """将角色的默认账号密码重置为统一初始密码。"""
+    """将角色的默认账号密码重置为统一初始密码。
+
+    注意：响应中只返回 username + 一条通用 message，不回显明文密码。密码本身
+    已知为 DEFAULT_USER_PASSWORD（系统常量），管理员无需从 API 拿回明文。
+    """
     role = session.get(Role, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
@@ -281,7 +285,10 @@ async def reset_role_password(
     user.password_hash = hash_password(settings.DEFAULT_USER_PASSWORD)
     session.add(user)
     session.commit()
-    return {"username": user.username, "password": settings.DEFAULT_USER_PASSWORD}
+    return {
+        "username": user.username,
+        "message": "密码已重置为统一初始密码",
+    }
 
 
 @router.delete("/roles/{role_id}", status_code=status.HTTP_204_NO_CONTENT)
@@ -637,9 +644,15 @@ def _find_workbook(
 @router.get("/overview", response_model=list[AdminBindingStatus])
 async def get_filling_overview(
     period: str = Query(..., pattern=PERIOD_PATTERN),
+    limit: int = Query(default=500, ge=1, le=2000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[AdminBindingStatus]:
-    """填报总览：该年份所有 部门×模板 绑定及对应周期的填报状态（含未填报项）。"""
+    """填报总览：该年份所有 部门×模板 绑定及对应周期的填报状态（含未填报项）。
+
+    分页：limit 默认 500（覆盖典型年 50 部门 × 10 模板），最大 2000。
+    超出分页时返回总数由客户端按需翻页（前端当前一次性拉全，树形折叠后再筛选，无需偏移）。
+    """
     year = int(period[:4])
     rows = session.exec(
         select(Role, Template, RoleWorkbook)
@@ -656,6 +669,8 @@ async def get_filling_overview(
         )
         .where(Template.year == year, Template.archived == False)  # noqa: E712
         .order_by(Role.id, Template.id)
+        .offset(offset)
+        .limit(limit)
     ).all()
     return [
         AdminBindingStatus(
@@ -691,9 +706,11 @@ async def get_filling_overview(
 async def list_filled_workbooks(
     period: str = Query(..., pattern=PERIOD_PATTERN),
     status_filter: str | None = Query(default=None, alias="status"),
+    limit: int = Query(default=200, ge=1, le=1000),
+    offset: int = Query(default=0, ge=0),
     session: Session = Depends(get_session),
 ) -> list[AdminWorkbookRead]:
-    """查看指定周期各部门已填写的填报记录（可按状态筛选）。"""
+    """查看指定周期各部门已填写的填报记录（可按状态筛选，分页）。"""
     year = int(period[:4])
     stmt = (
         select(RoleWorkbook, Role, Template)
@@ -701,6 +718,8 @@ async def list_filled_workbooks(
         .join(Template, Template.id == RoleWorkbook.template_id)
         .where(Template.year == year, RoleWorkbook.period == period)
         .order_by(RoleWorkbook.updated_at.desc())
+        .offset(offset)
+        .limit(limit)
     )
     if status_filter:
         stmt = stmt.where(RoleWorkbook.status == status_filter)

@@ -23,6 +23,13 @@ class Settings(BaseSettings):
     ALGORITHM: str = "HS256"
     ACCESS_TOKEN_EXPIRE_MINUTES: int = 60 * 24
 
+    # JWT 签发者与受众（生产环境强烈建议设置，防止跨服务 token 互用）。
+    # 留空则不写入 iss/aud 字段（向后兼容）。
+    JWT_ISSUER: str = ""
+    JWT_AUDIENCE: str = ""
+    # JWT 时间校验宽容度（秒），容忍客户端/服务端微小时钟偏差。
+    JWT_LEEWAY_SECONDS: int = 10
+
     # SQLite 数据库文件路径（相对 backend 目录）。
     DATABASE_URL: str = f"sqlite:///{Path(__file__).resolve().parent.parent / 'app.db'}"
 
@@ -35,6 +42,15 @@ class Settings(BaseSettings):
     # 生产环境校验开关：设为 "1" 时 SECRET_KEY 必须非占位且 ≥ 32 字节（启动即抛错）。
     # 开发环境留空，仅打印警告，避免本地开发摩擦。
     STRICT_SECRETS: str = ""
+
+    # CORS 允许的额外 origin（逗号分隔）。开发前端一般是 http://localhost:5173，
+    # 通过 Vite 代理同源转发不需要 CORS；只有跨域部署（前端域名 ≠ 后端域名）才需要。
+    # 留空则不启用 CORS（依赖同源/Vite 代理）。
+    CORS_ALLOWED_ORIGINS: str = ""
+
+    # 单条 Univer 快照（template / workbook）JSON 序列化后字节上限。
+    # 超限直接 413，避免恶意大 JSON 触发 OOM。
+    MAX_SNAPSHOT_BYTES: int = 5 * 1024 * 1024  # 5 MB
 
     class Config:
         env_file = ".env"
