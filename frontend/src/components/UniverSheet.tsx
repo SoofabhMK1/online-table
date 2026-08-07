@@ -153,62 +153,16 @@ const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
       const snapshot = initialSnapshot ?? createBlankWorkbookData()
       univer.createUnit(UniverInstanceType.UNIVER_SHEET, snapshot)
 
-      // 普通用户填报视图：关闭工作表级别操作（新建/删除/重命名/移动/隐藏/复制）。
+      // 关闭工作表级操作（仅在 mount 时调用一次即可，权限点设入后无副作用）
       if (readOnly || disableSheetOps) {
         blockSheetOperations(api)
       }
 
-      // 内容区与标签保护：仅内容区（矩形）可编辑，其余全部只读。
-      // 内容区 = 行 [colLabelRows, colLabelRows+contentRows) × 列 [rowLabelCols, rowLabelCols+contentCols)
-      // 若未配置内容区尺寸（contentRows/Cols 均为 0），则退化为仅锁定标签区。
-      // readOnly 模式下整表只读（已提交/已通过后展示，或管理员只读预览）。
-      const disposables: Array<() => void> = []
-      if (
-        readOnly ||
-        (protectedLabels && (protectedLabels.rowLabelCols > 0 || protectedLabels.colLabelRows > 0))
-      ) {
-        const { rowLabelCols, colLabelRows, contentRows, contentCols } = protectedLabels ?? {
-          rowLabelCols: 0,
-          colLabelRows: 0,
-          contentRows: 0,
-          contentCols: 0,
-        }
-        const hasContentArea = contentRows > 0 && contentCols > 0
-        const interceptorService = univer.__getInjector().get(SheetInterceptorService)
-        const disposable = interceptorService.writeCellInterceptor.intercept(VALIDATE_CELL, {
-          priority: 99,
-          handler: (value, context) => {
-            if (readOnly) {
-              return Promise.resolve(false)
-            }
-            const { row, col } = context
-            let editable: boolean
-            if (hasContentArea) {
-              editable =
-                row >= colLabelRows &&
-                row < colLabelRows + contentRows &&
-                col >= rowLabelCols &&
-                col < rowLabelCols + contentCols
-            } else {
-              editable = !(col < rowLabelCols || row < colLabelRows)
-            }
-            return editable ? (value ?? Promise.resolve(true)) : Promise.resolve(false)
-          },
-        })
-        disposables.push(disposable)
-      }
-
       onReady?.()
 
-      // 卸载时销毁实例，防止内存泄漏。
-      // 必须将 univer.dispose() 延后到 React 提交阶段之后执行：
-      // Univer 会把内部 React root 渲染到容器中，若在 React 卸载/提交阶段同步
-      // 调用 dispose()，会触发 React 19 的
-      // "Attempted to synchronously unmount a root while React was already rendering"
-      // 警告。延后执行后，Univer 内部 root 的卸载发生在 React 渲染之外，无此问题。
-      // （另：本项目已移除 StrictMode，避免双挂载复用同一容器时 dispose 清空新实例。）
+      // 卸载时销毁实例：必须延后到 React 提交阶段之后执行（Univer 内部 root 同步
+      // dispose 会触发 React 19 的 "Attempted to synchronously unmount a root" 警告）。
       return () => {
-        disposables.forEach((d) => d())
         const instance = univer
         setTimeout(() => {
           instance.dispose()
@@ -218,6 +172,50 @@ const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
       }
       // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [])
+
+    // 标签保护 / readOnly 拦截器：随 readOnly / protectedLabels 变化重注册。
+    // 让父组件只需通过 prop 切换 readOnly 即可即时生效，无需更换 key 重新挂载整个
+    // Univer 实例（大表时可显著减少白屏与状态丢失）。
+    useEffect(() => {
+      const univer = univerRef.current
+      if (!univer) {
+        return
+      }
+      const needsGuard =
+        readOnly ||
+        (protectedLabels != null &&
+          (protectedLabels.rowLabelCols > 0 || protectedLabels.colLabelRows > 0))
+      if (!needsGuard) {
+        return
+      }
+      const { rowLabelCols, colLabelRows, contentRows, contentCols } = protectedLabels ?? {
+        rowLabelCols: 0,
+        colLabelRows: 0,
+        contentRows: 0,
+        contentCols: 0,
+      }
+      const hasContentArea = contentRows > 0 && contentCols > 0
+      const interceptorService = univer.__getInjector().get(SheetInterceptorService)
+      const disposable = interceptorService.writeCellInterceptor.intercept(VALIDATE_CELL, {
+        priority: 99,
+        handler: (value, context) => {
+          if (readOnly) {
+            return Promise.resolve(false)
+          }
+          const { row, col } = context
+          const editable = hasContentArea
+            ? row >= colLabelRows &&
+              row < colLabelRows + contentRows &&
+              col >= rowLabelCols &&
+              col < rowLabelCols + contentCols
+            : !(col < rowLabelCols || row < colLabelRows)
+          return editable ? (value ?? Promise.resolve(true)) : Promise.resolve(false)
+        },
+      })
+      return () => {
+        disposable()
+      }
+    }, [readOnly, protectedLabels])
 
     return (
       <div ref={containerRef} style={{ width: '100%', height: '100%' }} />

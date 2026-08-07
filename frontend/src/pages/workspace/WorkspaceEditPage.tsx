@@ -270,7 +270,7 @@ export default function WorkspaceEditPage() {
         ) : (
           snapshot && (
             <UniverSheet
-              key={`${templateId}-${period}-${status}-${locked}`}
+              key={`${templateId}-${period}`}
               ref={sheetRef}
               initialSnapshot={snapshot}
               protectedLabels={protectedLabels}

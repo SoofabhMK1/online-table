@@ -369,9 +369,10 @@ export default function TemplatePanel() {
           <Upload
             accept=".xlsx,.xls"
             showUploadList={false}
-            beforeUpload={(file) => {
-              void handleImportFile(file)
-              return false
+            customRequest={({ file }) => {
+              if (file instanceof File) {
+                void handleImportFile(file)
+              }
             }}
           >
             <Button icon={<UploadOutlined />} loading={importing}>
