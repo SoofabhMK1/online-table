@@ -7,7 +7,7 @@
  *   4) OrgManager + 其它 panel
  */
 import { useEffect, useState } from 'react'
-import { Button, Layout, Space, Tabs, Typography, message } from 'antd'
+import { App, Button, Layout, Space, Tabs, Typography } from 'antd'
 import { useNavigate } from 'react-router-dom'
 import { useAuthStore } from '../../store/useAuthStore'
 import AccountSettingsModal from '../../components/AccountSettingsModal'
@@ -25,6 +25,7 @@ const { Header, Content } = Layout
 
 export default function AdminPage() {
   const navigate = useNavigate()
+  const { message } = App.useApp()
   const username = useAuthStore((s) => s.username)
   const setUsername = useAuthStore((s) => s.setUsername)
   const logout = useAuthStore((s) => s.logout)

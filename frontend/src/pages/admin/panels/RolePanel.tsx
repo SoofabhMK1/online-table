@@ -4,6 +4,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import {
+  App,
   Button,
   Card,
   Form,
@@ -15,7 +16,6 @@ import {
   Table,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
@@ -35,6 +35,7 @@ interface RoleFormValues {
 }
 
 export default function RolePanel() {
+  const { message } = App.useApp()
   const roles = useRolesStore((s) => s.roles)
   const orgTree = useRolesStore((s) => s.orgTree)
   const orgLoading = useRolesStore((s) => s.orgLoading)

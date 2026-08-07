@@ -4,6 +4,7 @@
  */
 import { useMemo, useRef, useState } from 'react'
 import {
+  App,
   Button,
   Card,
   Checkbox,
@@ -18,7 +19,6 @@ import {
   Tag,
   Typography,
   Upload,
-  message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import {
@@ -87,6 +87,7 @@ function deriveLabels(
 }
 
 export default function TemplatePanel() {
+  const { message } = App.useApp()
   const templates = useTemplatesStore((s) => s.templates)
   const loading = useTemplatesStore((s) => s.loading)
   const fetchActive = useTemplatesStore((s) => s.fetchActive)

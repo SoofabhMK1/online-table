@@ -1,6 +1,6 @@
 import { createRoot } from 'react-dom/client'
 import { RouterProvider } from 'react-router-dom'
-import { ConfigProvider } from 'antd'
+import { App as AntdApp, ConfigProvider } from 'antd'
 import zhCN from 'antd/locale/zh_CN'
 import './index.css'
 import { router } from './router'
@@ -12,6 +12,8 @@ import { router } from './router'
 // 并可能导致重新挂载后的 Univer 实例状态异常（单元格无法输入）。
 createRoot(document.getElementById('root')!).render(
   <ConfigProvider locale={zhCN}>
-    <RouterProvider router={router} />
+    <AntdApp>
+      <RouterProvider router={router} />
+    </AntdApp>
   </ConfigProvider>,
 )

@@ -3,13 +3,14 @@
  * 与 TemplatePanel 共用 useTemplates hook，两侧状态保持一致。
  */
 import { useState } from 'react'
-import { Button, Space, Table, Typography, message } from 'antd'
+import { App, Button, Space, Table, Typography } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { ReloadOutlined, UndoOutlined } from '@ant-design/icons'
 import type { TemplateItem } from '../../../api/types'
 import { useTemplatesStore } from '../../../store/useTemplatesStore'
 
 export default function ArchivedTemplatePanel() {
+  const { message } = App.useApp()
   const archivedTemplates = useTemplatesStore((s) => s.archivedTemplates)
   const archivedLoading = useTemplatesStore((s) => s.archivedLoading)
   const fetchArchived = useTemplatesStore((s) => s.fetchArchived)

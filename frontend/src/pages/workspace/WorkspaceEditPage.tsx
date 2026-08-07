@@ -1,13 +1,12 @@
 import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import {
   Alert,
+  App,
   Button,
-  Modal,
   Space,
   Spin,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import {
   ArrowLeftOutlined,
@@ -33,6 +32,7 @@ export default function WorkspaceEditPage() {
   const { templateId } = useParams()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
+  const { message, modal } = App.useApp()
   const logout = useAuthStore((s) => s.logout)
   const username = useAuthStore((s) => s.username)
   const setUsername = useAuthStore((s) => s.setUsername)
@@ -75,7 +75,7 @@ export default function WorkspaceEditPage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     const tid = Number(templateId)
@@ -135,7 +135,7 @@ export default function WorkspaceEditPage() {
   }
 
   const handleSubmit = () => {
-    Modal.confirm({
+    modal.confirm({
       title: '确认提交填报？',
       content: '提交后该周期的填报将被锁定，等待财务审核（如需修改需被退回后）。',
       okText: '确认提交',

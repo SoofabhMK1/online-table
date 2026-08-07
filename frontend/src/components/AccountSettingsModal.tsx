@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Form, Input, Modal, message } from 'antd'
+import { App, Form, Input, Modal } from 'antd'
 import { changeAccountApi } from '../api/auth'
 
 interface AccountFormValues {
@@ -22,6 +22,7 @@ export default function AccountSettingsModal({
   currentUsername,
   onUsernameChanged,
 }: AccountSettingsModalProps) {
+  const { message } = App.useApp()
   const [form] = Form.useForm<AccountFormValues>()
   const [submitting, setSubmitting] = useState(false)
 

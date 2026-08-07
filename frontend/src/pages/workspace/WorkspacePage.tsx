@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
+  App,
   Button,
   Card,
   Col,
@@ -10,7 +11,6 @@ import {
   Space,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import { TableOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
@@ -29,6 +29,7 @@ const { Header, Content } = Layout
 
 export default function WorkspacePage() {
   const navigate = useNavigate()
+  const { message } = App.useApp()
   const username = useAuthStore((s) => s.username)
   const setUsername = useAuthStore((s) => s.setUsername)
   const logout = useAuthStore((s) => s.logout)
@@ -46,7 +47,7 @@ export default function WorkspacePage() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     load(period)

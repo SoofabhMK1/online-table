@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import {
+  App,
   Button,
   InputNumber,
   Space,
@@ -11,13 +12,13 @@ import {
   Table,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import { ReloadOutlined } from '@ant-design/icons'
 import { fetchPeriods, upsertPeriod } from '../../../api/admin'
 import type { FillingPeriodItem } from '../../../api/types'
 
 export default function PeriodPanel() {
+  const { message } = App.useApp()
   const [year, setYear] = useState(new Date().getFullYear())
   const [periods, setPeriods] = useState<FillingPeriodItem[]>([])
   const [loading, setLoading] = useState(false)
@@ -32,7 +33,7 @@ export default function PeriodPanel() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     void reload(year)

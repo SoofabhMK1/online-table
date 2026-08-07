@@ -1,5 +1,6 @@
 ﻿import { useEffect, useMemo, useState } from 'react'
 import {
+  App,
   Button,
   Card,
   Col,
@@ -10,7 +11,6 @@ import {
   Space,
   Spin,
   Typography,
-  message,
 } from 'antd'
 import { DeleteOutlined, EditOutlined, PlusOutlined } from '@ant-design/icons'
 import {
@@ -45,6 +45,7 @@ interface OrgManagerProps {
 
 /** 组织架构管理：业务板块 → 主体 → 部门 + 职能标签。 */
 export default function OrgManager({ tree, onChanged, loading = false }: OrgManagerProps) {
+  const { message } = App.useApp()
   const [selectedSegmentId, setSelectedSegmentId] = useState<number | null>(null)
   const [selectedEntityId, setSelectedEntityId] = useState<number | null>(null)
 

@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Button, Card, Form, Input, Typography, message } from 'antd'
+import { App, Button, Card, Form, Input, Typography } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { loginApi } from '../api/auth'
@@ -13,6 +13,7 @@ interface LoginFormValues {
 
 export default function LoginPage() {
   const navigate = useNavigate()
+  const { message } = App.useApp()
   const setAuth = useAuthStore((s) => s.setAuth)
   const [loading, setLoading] = useState(false)
 

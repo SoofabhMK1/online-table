@@ -3,6 +3,7 @@
  */
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  App,
   Button,
   DatePicker,
   Input,
@@ -12,7 +13,6 @@ import {
   Table,
   Tag,
   Typography,
-  message,
 } from 'antd'
 import type { TableColumnsType } from 'antd'
 import { DownloadOutlined, ReloadOutlined } from '@ant-design/icons'
@@ -39,6 +39,7 @@ import {
 } from '../../../utils/overviewTree'
 
 export default function OverviewPanel() {
+  const { message } = App.useApp()
   const [period, setPeriod] = useState<string>(currentPeriod())
   const [overview, setOverview] = useState<AdminBindingStatus[]>([])
   const [overviewLoading, setOverviewLoading] = useState(false)
@@ -70,7 +71,7 @@ export default function OverviewPanel() {
     } finally {
       setOverviewLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     void reloadOverview(period)

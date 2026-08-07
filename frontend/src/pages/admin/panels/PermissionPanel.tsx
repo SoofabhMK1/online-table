@@ -3,7 +3,7 @@
  * 角色列表 + 模板列表分别来自 useRolesStore / useTemplatesStore（与 RolePanel / TemplatePanel 共享）。
  */
 import { useEffect, useState } from 'react'
-import { Button, Card, Select, Space, Spin, Transfer, Typography, message } from 'antd'
+import { App, Button, Card, Select, Space, Spin, Transfer, Typography } from 'antd'
 import type { Key } from 'react'
 import { SaveOutlined } from '@ant-design/icons'
 import { bindRoleTemplates, fetchRoleTemplates } from '../../../api/admin'
@@ -11,6 +11,7 @@ import { useRolesStore } from '../../../store/useRolesStore'
 import { useTemplatesStore } from '../../../store/useTemplatesStore'
 
 export default function PermissionPanel() {
+  const { message } = App.useApp()
   const roles = useRolesStore((s) => s.roles)
   const fetchRoles = useRolesStore((s) => s.fetchRoles)
   const templates = useTemplatesStore((s) => s.templates)
