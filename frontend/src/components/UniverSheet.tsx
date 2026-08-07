@@ -24,8 +24,8 @@ import { buildLocales } from './univerLocales'
 
 /** 向上级暴露的 UniverSheet 句柄。 */
 export interface UniverSheetHandle {
-  /** 获取当前工作簿的最新 Snapshot。 */
-  getWorkbookData: () => IWorkbookData
+  /** 获取当前工作簿的最新 Snapshot；未就绪时返回 null（不抛错，便于上层兜底）。 */
+  getWorkbookData: () => IWorkbookData | null
 }
 
 /** 标签与内容区配置。 */
@@ -108,19 +108,23 @@ const UniverSheet = forwardRef<UniverSheetHandle, UniverSheetProps>(
     const univerRef = useRef<Univer | null>(null)
     const apiRef = useRef<FUniver | null>(null)
 
-    useImperativeHandle(ref, () => ({
-      getWorkbookData: () => {
-        const api = apiRef.current
-        if (!api) {
-          throw new Error('Univer 尚未初始化')
-        }
-        const workbook = api.getActiveWorkbook()
-        if (!workbook) {
-          throw new Error('没有活动的工作簿')
-        }
-        return workbook.save()
-      },
-    }))
+    useImperativeHandle<UniverSheetHandle, UniverSheetHandle>(
+      ref,
+      () => ({
+        getWorkbookData: (): IWorkbookData | null => {
+          const api = apiRef.current
+          if (!api) {
+            return null
+          }
+          const workbook = api.getActiveWorkbook()
+          if (!workbook) {
+            return null
+          }
+          return workbook.save() as IWorkbookData
+        },
+      }),
+      [],
+    )
 
     useEffect(() => {
       const container = containerRef.current
