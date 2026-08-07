@@ -17,6 +17,12 @@ export interface ChangePasswordRequest {
   new_password: string
 }
 
+export interface ChangeAccountRequest {
+  old_password: string
+  new_username?: string
+  new_password?: string
+}
+
 export interface TemplateItem {
   id: number
   name: string

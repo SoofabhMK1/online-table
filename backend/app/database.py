@@ -23,6 +23,7 @@ def create_db_and_tables() -> None:
     _migrate_workbooks()
     _migrate_roles_classification()
     _migrate_role_name_uniqueness()
+    _migrate_users_default_flag()
 
 
 def _migrate_templates_columns() -> None:
@@ -108,6 +109,19 @@ def _migrate_role_name_uniqueness() -> None:
                 "ON roles (department_id, name)"
             )
         )
+
+
+def _migrate_users_default_flag() -> None:
+    """轻量迁移：为 users 表补齐 is_default 标记列（幂等）。"""
+    from sqlalchemy import inspect, text
+
+    inspector = inspect(engine)
+    columns = {c["name"] for c in inspector.get_columns("users")}
+    if "is_default" not in columns:
+        with engine.begin() as conn:
+            conn.execute(
+                text("ALTER TABLE users ADD COLUMN is_default INTEGER NOT NULL DEFAULT 0")
+            )
 
 
 def get_session() -> Generator[Session, None, None]:

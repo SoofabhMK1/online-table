@@ -89,7 +89,7 @@ frontend/
 
 - **roles**: `id`, `name`（**部门内唯一**，复合唯一 `(department_id, name)`）, `segment_id`→business_segments, `entity_id`→org_entities, `department_id`→org_departments, `function_tag_id`→function_tags（分类均可空，填报仍按角色独立；默认账号用户名 = `role_{id}`）
 - **business_segments**（业务板块）/ **org_entities**（主体，属板块）/ **org_departments**（部门，属主体）/ **function_tags**（职能标签，全局）：组织架构三层 + 职能标签
-- **users**: `id`, `username`(unique), `password_hash`, `role_id`→roles.id
+- **users**: `id`, `username`(unique), `password_hash`, `role_id`→roles.id, `is_default`（角色默认账号标记，重置密码/删除角色按此定位，用户名可在账号设置中自行修改）
 - **templates**: `id`, `name`, `year`(填报年份), `snapshot`(JSON), `row_label_cols`, `col_label_rows`, `content_rows`, `content_cols`, `content_numeric`, `archived`, `archived_at`, `created_at`
   - 标签/内容区语义：左侧 `row_label_cols` 列为行标签；上方 `col_label_rows` 行为列标签；**内容区 = 行 `[col_label_rows, +content_rows)` × 列 `[row_label_cols, +content_cols)`**
   - `content_numeric=True` 时，提交校验内容区非空单元格必须为数值
@@ -107,6 +107,7 @@ frontend/
 - **认证**
   - `POST /auth/login` {username, password} → `{access_token, user_id, username, role_id, role_name}`
   - `POST /auth/change-password` {old_password, new_password} → 当前登录用户修改自己的密码（需登录）
+  - `POST /auth/change-account` {old_password, new_username?, new_password?} → 当前登录用户修改自己的用户名/密码（需输入原密码确认身份；用户名唯一）
 - **管理员**（需 `get_current_admin`，即角色名为「管理员」）
   - `GET /admin/roles` → 角色列表（**不含管理员角色**，含组织分类名称）
   - `POST /admin/roles` {name, segment_id?, entity_id?, department_id?, function_tag_id?} → 创建角色（提供 department_id 自动补全其所属 entity/segment）+ 自动创建默认账号

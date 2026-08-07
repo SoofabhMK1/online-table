@@ -16,7 +16,7 @@ import { TableOutlined } from '@ant-design/icons'
 import { useNavigate } from 'react-router-dom'
 import { fetchWorkspaceTemplates } from '../../api/workspace'
 import type { WorkspaceTemplateItem } from '../../api/types'
-import ChangePasswordModal from '../../components/ChangePasswordModal'
+import AccountSettingsModal from '../../components/AccountSettingsModal'
 import { useAuthStore } from '../../store/useAuthStore'
 import {
   currentPeriod,
@@ -30,6 +30,7 @@ const { Header, Content } = Layout
 export default function WorkspacePage() {
   const navigate = useNavigate()
   const username = useAuthStore((s) => s.username)
+  const setUsername = useAuthStore((s) => s.setUsername)
   const logout = useAuthStore((s) => s.logout)
   const [period, setPeriod] = useState<string>(currentPeriod())
   const [templates, setTemplates] = useState<WorkspaceTemplateItem[]>([])
@@ -78,13 +79,15 @@ export default function WorkspacePage() {
           <Typography.Text style={{ color: '#fff' }}>
             当前用户：{username ?? ''}
           </Typography.Text>
-          <Button onClick={() => setChangePwdOpen(true)}>修改密码</Button>
+          <Button onClick={() => setChangePwdOpen(true)}>账号设置</Button>
           <Button onClick={handleLogout}>退出登录</Button>
         </Space>
       </Header>
-      <ChangePasswordModal
+      <AccountSettingsModal
         open={changePwdOpen}
         onClose={() => setChangePwdOpen(false)}
+        currentUsername={username ?? ''}
+        onUsernameChanged={setUsername}
       />
       <Content style={{ padding: 24 }}>
         <Space style={{ marginBottom: 16 }} size="middle" wrap>

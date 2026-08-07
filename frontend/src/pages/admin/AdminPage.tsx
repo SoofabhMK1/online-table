@@ -45,7 +45,7 @@ import {
 import { useNavigate } from 'react-router-dom'
 import type { IWorkbookData } from '@univerjs/core'
 import UniverSheet, { type UniverSheetHandle } from '../../components/UniverSheet'
-import ChangePasswordModal from '../../components/ChangePasswordModal'
+import AccountSettingsModal from '../../components/AccountSettingsModal'
 import OrgManager from '../../components/OrgManager'
 import { parseCellRef, formatCell, formatRange } from '../../utils/cellRef'
 import { computeUsedRange, type UsedRange } from '../../utils/usedRange'
@@ -143,6 +143,7 @@ function deriveLabels(
 export default function AdminPage() {
   const navigate = useNavigate()
   const username = useAuthStore((s) => s.username)
+  const setUsername = useAuthStore((s) => s.setUsername)
   const logout = useAuthStore((s) => s.logout)
 
   // 模板管理
@@ -1142,7 +1143,7 @@ export default function AdminPage() {
           <Typography.Text style={{ color: '#fff' }}>
             当前用户：{username ?? ''}
           </Typography.Text>
-          <Button onClick={() => setChangePwdOpen(true)}>修改密码</Button>
+          <Button onClick={() => setChangePwdOpen(true)}>账号设置</Button>
           <Button onClick={handleLogout}>退出登录</Button>
         </Space>
       </Header>
@@ -1160,9 +1161,11 @@ export default function AdminPage() {
         />
       </Content>
 
-      <ChangePasswordModal
+      <AccountSettingsModal
         open={changePwdOpen}
         onClose={() => setChangePwdOpen(false)}
+        currentUsername={username ?? ''}
+        onUsernameChanged={setUsername}
       />
 
       <Modal

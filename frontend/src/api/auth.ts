@@ -1,5 +1,6 @@
 import { post } from './http'
 import type {
+  ChangeAccountRequest,
   ChangePasswordRequest,
   LoginRequest,
   LoginResponse,
@@ -17,4 +18,10 @@ export async function changePasswordApi(
     old_password: oldPassword,
     new_password: newPassword,
   } satisfies ChangePasswordRequest)
+}
+
+export async function changeAccountApi(
+  payload: ChangeAccountRequest,
+): Promise<{ username: string; message: string }> {
+  return post<{ username: string; message: string }>('/auth/change-account', payload)
 }

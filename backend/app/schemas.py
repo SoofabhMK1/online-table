@@ -24,6 +24,14 @@ class ChangePasswordRequest(BaseModel):
     new_password: str = Field(min_length=6, max_length=64)
 
 
+class ChangeAccountRequest(BaseModel):
+    """当前用户修改账号（用户名/密码）请求体。需输入原密码确认身份。"""
+
+    old_password: str
+    new_username: str | None = Field(default=None, min_length=1, max_length=50)
+    new_password: str | None = Field(default=None, min_length=6, max_length=64)
+
+
 class TokenResponse(BaseModel):
     """登录成功后的 JWT Token 响应。"""
 

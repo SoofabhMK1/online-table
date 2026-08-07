@@ -86,7 +86,7 @@ class Role(SQLModel, table=True):
 
 
 class User(SQLModel, table=True):
-    """用户表。"""
+    """用户表。is_default 标记角色「默认账号」，用于重置密码等按角色定位账号（不依赖用户名）。"""
 
     __tablename__ = "users"
 
@@ -94,6 +94,7 @@ class User(SQLModel, table=True):
     username: str = Field(unique=True, index=True)
     password_hash: str
     role_id: int = Field(foreign_key="roles.id")
+    is_default: bool = Field(default=False, index=True)
 
     role: Role | None = Relationship(back_populates="users")
 

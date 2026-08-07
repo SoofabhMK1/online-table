@@ -15,6 +15,7 @@ interface AuthState {
     roleId: number
     roleName: string
   }) => void
+  setUsername: (username: string) => void
   logout: () => void
 }
 
@@ -29,6 +30,7 @@ export const useAuthStore = create<AuthState>()(
       isAuthenticated: false,
       setAuth: ({ token, userId, username, roleId, roleName }) =>
         set({ token, userId, username, roleId, roleName, isAuthenticated: true }),
+      setUsername: (username) => set({ username }),
       logout: () =>
         set({
           token: null,

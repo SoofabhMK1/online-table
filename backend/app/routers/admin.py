@@ -47,26 +47,54 @@ router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(ge
 
 
 def _role_default_username(role: Role) -> str:
-    """角色默认账号的用户名：自动生成且全局唯一，与角色名解耦、改名不影响。"""
+    """角色默认账号的初始用户名：自动生成且全局唯一，与角色名解耦、改名不影响。"""
     return f"role_{role.id}"
 
 
 def _ensure_role_default_user(session: Session, role: Role) -> User:
-    """确保角色存在默认账号（用户名=role_{id}），不存在则创建。"""
-    username = _role_default_username(role)
+    """确保角色存在默认账号（按 is_default 标记定位，用户名可在账号设置中自行修改）。
+
+    定位顺序：is_default 用户 → 旧 scheme（username=role_{id}）回填标记 → 角色下首个用户兜底 → 新建。
+    """
     user = session.exec(
-        select(User).where(User.username == username)
+        select(User).where(User.role_id == role.id, User.is_default == True)  # noqa: E712
     ).first()
     if user is None:
+        user = session.exec(
+            select(User).where(
+                User.role_id == role.id, User.username == _role_default_username(role)
+            )
+        ).first()
+        if user is None:
+            user = session.exec(
+                select(User).where(User.role_id == role.id).order_by(User.id)
+            ).first()
+        if user is not None:
+            user.is_default = True
+            session.add(user)
+            session.commit()
+            session.refresh(user)
+            return user
         user = User(
-            username=username,
+            username=_role_default_username(role),
             password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
             role_id=role.id,
+            is_default=True,
         )
         session.add(user)
         session.commit()
         session.refresh(user)
     return user
+
+
+def _role_default_user_username(session: Session, role: Role) -> str:
+    """角色默认账号当前的实际用户名（可能已被用户改名），供展示。"""
+    user = session.exec(
+        select(User).where(User.role_id == role.id, User.is_default == True)  # noqa: E712
+    ).first()
+    if user is not None:
+        return user.username
+    return _role_default_username(role)
 
 
 def _role_to_read(session: Session, role: Role) -> RoleRead:
@@ -90,7 +118,7 @@ def _role_to_read(session: Session, role: Role) -> RoleRead:
         function_tag_name=session.get(FunctionTag, role.function_tag_id).name
         if role.function_tag_id
         else None,
-        default_username=_role_default_username(role),
+        default_username=_role_default_user_username(session, role),
     )
 
 
@@ -266,9 +294,11 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色不可删除"
         )
-    default_username = _role_default_username(role)
+    default_user = session.exec(
+        select(User).where(User.role_id == role_id, User.is_default == True)  # noqa: E712
+    ).first()
     other_users = session.exec(
-        select(User).where(User.role_id == role_id, User.username != default_username)
+        select(User).where(User.role_id == role_id, User.is_default != True)  # noqa: E712
     ).all()
     if other_users:
         raise HTTPException(
@@ -278,9 +308,6 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
         select(RoleTemplateMapping).where(RoleTemplateMapping.role_id == role_id)
     ).all():
         session.delete(link)
-    default_user = session.exec(
-        select(User).where(User.username == default_username)
-    ).first()
     if default_user is not None:
         session.delete(default_user)
     session.delete(role)

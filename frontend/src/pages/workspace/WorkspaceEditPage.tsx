@@ -24,7 +24,7 @@ import {
   fetchWorkspaceTemplateDetail,
   submitWorkbook,
 } from '../../api/workspace'
-import ChangePasswordModal from '../../components/ChangePasswordModal'
+import AccountSettingsModal from '../../components/AccountSettingsModal'
 import { useAuthStore } from '../../store/useAuthStore'
 import { currentPeriod, STATUS_META } from '../../utils/workbookStatus'
 import { validateContentNumeric } from '../../utils/validateContent'
@@ -35,6 +35,7 @@ export default function WorkspaceEditPage() {
   const navigate = useNavigate()
   const logout = useAuthStore((s) => s.logout)
   const username = useAuthStore((s) => s.username)
+  const setUsername = useAuthStore((s) => s.setUsername)
   const sheetRef = useRef<UniverSheetHandle>(null)
   const period = searchParams.get('period') ?? currentPeriod()
   const [snapshot, setSnapshot] = useState<IWorkbookData | null>(null)
@@ -197,7 +198,7 @@ export default function WorkspaceEditPage() {
               </Button>
             </>
           )}
-          <Button onClick={() => setChangePwdOpen(true)}>修改密码</Button>
+          <Button onClick={() => setChangePwdOpen(true)}>账号设置</Button>
           <Button
             onClick={() => {
               logout()
@@ -209,9 +210,11 @@ export default function WorkspaceEditPage() {
           </Button>
         </Space>
       </div>
-      <ChangePasswordModal
+      <AccountSettingsModal
         open={changePwdOpen}
         onClose={() => setChangePwdOpen(false)}
+        currentUsername={username ?? ''}
+        onUsernameChanged={setUsername}
       />
       {status === 'rejected' && (
         <Alert
