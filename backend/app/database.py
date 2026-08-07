@@ -22,6 +22,7 @@ def create_db_and_tables() -> None:
     _migrate_templates_columns()
     _migrate_workbooks()
     _migrate_roles_classification()
+    _migrate_role_name_uniqueness()
 
 
 def _migrate_templates_columns() -> None:
@@ -93,6 +94,20 @@ def _migrate_roles_classification() -> None:
             if col not in columns:
                 conn.execute(text(f"ALTER TABLE roles ADD COLUMN {col} INTEGER"))
         conn.commit()
+
+
+def _migrate_role_name_uniqueness() -> None:
+    """轻量迁移：角色名唯一性由全局改为「部门内唯一」（删除旧全局唯一索引，建立复合唯一索引）。"""
+    from sqlalchemy import text
+
+    with engine.begin() as conn:
+        conn.execute(text("DROP INDEX IF EXISTS ix_roles_name"))
+        conn.execute(
+            text(
+                "CREATE UNIQUE INDEX IF NOT EXISTS ix_roles_department_name "
+                "ON roles (department_id, name)"
+            )
+        )
 
 
 def get_session() -> Generator[Session, None, None]:

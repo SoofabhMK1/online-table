@@ -13,7 +13,7 @@
 - **填报期间锁定**：管理员在「填报期间」Tab 手动锁定/解锁某月（`filling_periods`），锁定后该月所有部门不可再保存/提交（无自动截止时间）。
 - **内容区数字校验**：模板可选「内容区仅允许数字」（`content_numeric`），提交时非空单元格必须为数值，否则返回非法单元格坐标（如「B2 需为数字」）。
 - **角色分类**：角色按「业务板块 → 主体 → 部门 + 职能标签」分类（在「组织架构」Tab 统一配置三层与全局职能标签）；「角色管理」Tab 通过弹窗**级联选择**分类并填写角色名（一个部门可建多个角色），分类为组织元数据、填报仍按角色独立。
-- **角色** 由管理员创建，创建时自动生成默认账号（用户名=角色名，统一初始密码），管理员可一键重置密码。
+- **角色** 由管理员创建，**角色名在同一部门内唯一**（不同部门可有同名角色，如多个财务部的「财务主管」）；创建时自动生成默认账号，**用户名自动生成 `role_{id}`**（全局唯一、与角色名解耦、改名不影响），统一初始密码，管理员可一键重置密码。
 
 ## 技术栈
 
@@ -87,7 +87,7 @@ frontend/
 
 5 张表，snapshot 均以 SQLAlchemy `Column(JSON)` 存 SQLite（自动序列化，**禁止二次 json.dumps**）。
 
-- **roles**: `id`, `name`(unique), `segment_id`→business_segments, `entity_id`→org_entities, `department_id`→org_departments, `function_tag_id`→function_tags（分类均可空，填报仍按角色独立）
+- **roles**: `id`, `name`（**部门内唯一**，复合唯一 `(department_id, name)`）, `segment_id`→business_segments, `entity_id`→org_entities, `department_id`→org_departments, `function_tag_id`→function_tags（分类均可空，填报仍按角色独立；默认账号用户名 = `role_{id}`）
 - **business_segments**（业务板块）/ **org_entities**（主体，属板块）/ **org_departments**（部门，属主体）/ **function_tags**（职能标签，全局）：组织架构三层 + 职能标签
 - **users**: `id`, `username`(unique), `password_hash`, `role_id`→roles.id
 - **templates**: `id`, `name`, `year`(填报年份), `snapshot`(JSON), `row_label_cols`, `col_label_rows`, `content_rows`, `content_cols`, `content_numeric`, `archived`, `archived_at`, `created_at`
@@ -100,7 +100,7 @@ frontend/
   - `status`：`draft`(草稿) / `submitted`(已提交) / `approved`(已通过) / `rejected`(已退回)
 - **filling_periods**: `id`, `period`(unique), `locked`, `created_at` —— 管理员手动锁定/解锁某填报月
 
-> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列（均幂等）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
+> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列；`database._migrate_role_name_uniqueness()` 将角色名唯一性由全局改为部门内（删 `ix_roles_name`、建 `ix_roles_department_name`，均幂等）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
 
 ## RESTful API（全部前缀 `/api`）
 

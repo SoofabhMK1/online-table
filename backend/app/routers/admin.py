@@ -46,14 +46,20 @@ from app.security import hash_password
 router = APIRouter(prefix="/api/admin", tags=["admin"], dependencies=[Depends(get_current_admin)])
 
 
+def _role_default_username(role: Role) -> str:
+    """角色默认账号的用户名：自动生成且全局唯一，与角色名解耦、改名不影响。"""
+    return f"role_{role.id}"
+
+
 def _ensure_role_default_user(session: Session, role: Role) -> User:
-    """确保角色存在默认账号（用户名=角色名），不存在则创建。"""
+    """确保角色存在默认账号（用户名=role_{id}），不存在则创建。"""
+    username = _role_default_username(role)
     user = session.exec(
-        select(User).where(User.username == role.name)
+        select(User).where(User.username == username)
     ).first()
     if user is None:
         user = User(
-            username=role.name,
+            username=username,
             password_hash=hash_password(settings.DEFAULT_USER_PASSWORD),
             role_id=role.id,
         )
@@ -84,7 +90,26 @@ def _role_to_read(session: Session, role: Role) -> RoleRead:
         function_tag_name=session.get(FunctionTag, role.function_tag_id).name
         if role.function_tag_id
         else None,
+        default_username=_role_default_username(role),
     )
+
+
+def _ensure_role_name_unique(
+    session: Session, name: str, department_id: int | None, exclude_role_id: int | None = None
+) -> None:
+    """校验角色名在「同一部门内」唯一（部门为空时按未分类互查）；冲突抛 400。"""
+    stmt = select(Role).where(Role.name == name)
+    if department_id is not None:
+        stmt = stmt.where(Role.department_id == department_id)
+    else:
+        stmt = stmt.where(Role.department_id.is_(None))
+    if exclude_role_id is not None:
+        stmt = stmt.where(Role.id != exclude_role_id)
+    if session.exec(stmt).first() is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="该部门下已存在同名角色",
+        )
 
 
 def _normalize_role_classification(
@@ -146,16 +171,10 @@ async def create_role(
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色为系统保留角色"
         )
-    existing = session.exec(
-        select(Role).where(Role.name == body.name)
-    ).first()
-    if existing is not None:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST, detail="角色已存在"
-        )
     segment_id, entity_id, department_id = _normalize_role_classification(
         session, body.segment_id, body.entity_id, body.department_id
     )
+    _ensure_role_name_unique(session, body.name, department_id)
     _ensure_function_tag(session, body.function_tag_id)
     role = Role(
         name=body.name,
@@ -177,7 +196,7 @@ async def update_role(
     body: RoleUpdate,
     session: Session = Depends(get_session),
 ) -> RoleRead:
-    """编辑角色名称/分类；改名时同步更新其默认账号的用户名。"""
+    """编辑角色名称/分类；默认账号用户名（role_{id}）保持不变。"""
     role = session.get(Role, role_id)
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
@@ -186,36 +205,28 @@ async def update_role(
             status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色不可编辑"
         )
     provided = body.model_fields_set
+    next_department_id = role.department_id
+    if {"segment_id", "entity_id", "department_id"} & provided:
+        next_department_id = (
+            body.department_id if "department_id" in provided else role.department_id
+        )
+        segment_id, entity_id, department_id = _normalize_role_classification(
+            session,
+            body.segment_id if "segment_id" in provided else role.segment_id,
+            body.entity_id if "entity_id" in provided else role.entity_id,
+            next_department_id,
+        )
+        role.segment_id = segment_id
+        role.entity_id = entity_id
+        role.department_id = department_id
+        next_department_id = department_id
     if "name" in provided and body.name is not None:
         if body.name == settings.ADMIN_ROLE_NAME:
             raise HTTPException(
                 status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色为系统保留角色"
             )
-        if body.name != role.name:
-            existing = session.exec(
-                select(Role).where(Role.name == body.name)
-            ).first()
-            if existing is not None:
-                raise HTTPException(
-                    status_code=status.HTTP_400_BAD_REQUEST, detail="角色已存在"
-                )
-            default_user = session.exec(
-                select(User).where(User.username == role.name)
-            ).first()
-            role.name = body.name
-            if default_user is not None:
-                default_user.username = body.name
-                session.add(default_user)
-    if {"segment_id", "entity_id", "department_id"} & provided:
-        segment_id, entity_id, department_id = _normalize_role_classification(
-            session,
-            body.segment_id if "segment_id" in provided else role.segment_id,
-            body.entity_id if "entity_id" in provided else role.entity_id,
-            body.department_id if "department_id" in provided else role.department_id,
-        )
-        role.segment_id = segment_id
-        role.entity_id = entity_id
-        role.department_id = department_id
+        _ensure_role_name_unique(session, body.name, next_department_id, exclude_role_id=role.id)
+        role.name = body.name
     if "function_tag_id" in provided:
         if body.function_tag_id is not None:
             _ensure_function_tag(session, body.function_tag_id)
@@ -255,8 +266,9 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST, detail="管理员角色不可删除"
         )
+    default_username = _role_default_username(role)
     other_users = session.exec(
-        select(User).where(User.role_id == role_id, User.username != role.name)
+        select(User).where(User.role_id == role_id, User.username != default_username)
     ).all()
     if other_users:
         raise HTTPException(
@@ -267,7 +279,7 @@ async def delete_role(role_id: int, session: Session = Depends(get_session)) -> 
     ).all():
         session.delete(link)
     default_user = session.exec(
-        select(User).where(User.username == role.name)
+        select(User).where(User.username == default_username)
     ).first()
     if default_user is not None:
         session.delete(default_user)

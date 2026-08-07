@@ -106,7 +106,7 @@ class RoleTemplateBind(BaseModel):
 
 
 class RoleRead(BaseModel):
-    """角色响应（含组织分类名称）。"""
+    """角色响应（含组织分类名称与默认账号用户名）。"""
 
     id: int
     name: str
@@ -118,6 +118,7 @@ class RoleRead(BaseModel):
     department_name: str | None = None
     function_tag_id: int | None = None
     function_tag_name: str | None = None
+    default_username: str | None = None
 
 
 class RoleCreate(BaseModel):

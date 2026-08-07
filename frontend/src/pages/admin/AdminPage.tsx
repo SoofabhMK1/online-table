@@ -819,7 +819,7 @@ export default function AdminPage() {
     {
       title: '默认账号',
       width: 170,
-      render: (_, record) => `${record.name} / 初始密码 123456`,
+      render: (_, record) => `${record.default_username ?? `role_${record.id}`} / 初始密码 123456`,
     },
     {
       title: '操作',

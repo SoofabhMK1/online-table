@@ -50,6 +50,7 @@ export interface RoleItem {
   department_name: string | null
   function_tag_id: number | null
   function_tag_name: string | null
+  default_username: string | null
 }
 
 export interface RoleCreateRequest {

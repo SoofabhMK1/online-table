@@ -51,12 +51,16 @@ class FunctionTag(SQLModel, table=True):
 
 
 class Role(SQLModel, table=True):
-    """角色表。角色按 业务板块→主体→部门 + 职能标签 分类，分类为组织元数据（可空）。"""
+    """角色表。角色按 业务板块→主体→部门 + 职能标签 分类，分类为组织元数据（可空）。
+
+    角色名在同一部门（department_id）内唯一；不同部门可存在同名角色（如多个财务部都有「财务主管」）。
+    """
 
     __tablename__ = "roles"
+    __table_args__ = (UniqueConstraint("department_id", "name"),)
 
     id: int | None = Field(default=None, primary_key=True)
-    name: str = Field(unique=True, index=True)
+    name: str = Field(index=True)
     segment_id: int | None = Field(
         default=None, foreign_key="business_segments.id", index=True
     )
