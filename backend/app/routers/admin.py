@@ -87,38 +87,90 @@ def _ensure_role_default_user(session: Session, role: Role) -> User:
     return user
 
 
-def _role_default_user_username(session: Session, role: Role) -> str:
-    """角色默认账号当前的实际用户名（可能已被用户改名），供展示。"""
-    user = session.exec(
-        select(User).where(User.role_id == role.id, User.is_default == True)  # noqa: E712
-    ).first()
-    if user is not None:
-        return user.username
-    return _role_default_username(role)
+def _batch_load_org_lookup(session: Session, roles: list[Role]) -> dict:
+    """批量预加载角色列表所需的 org 分类名称 + 默认账号用户名。
+
+    把原本每行 5 次 session.get（segment / entity / department / function_tag / default_user）
+    收成 4 次 IN 查询，从 O(N×5) 降到 O(4)。
+    """
+    seg_ids = {r.segment_id for r in roles if r.segment_id is not None}
+    ent_ids = {r.entity_id for r in roles if r.entity_id is not None}
+    dept_ids = {r.department_id for r in roles if r.department_id is not None}
+    tag_ids = {r.function_tag_id for r in roles if r.function_tag_id is not None}
+    role_ids = {r.id for r in roles}
+
+    segs: dict[int, str] = {}
+    if seg_ids:
+        segs = {
+            s.id: s.name
+            for s in session.exec(
+                select(BusinessSegment).where(BusinessSegment.id.in_(seg_ids))
+            ).all()
+        }
+    ents: dict[int, str] = {}
+    if ent_ids:
+        ents = {
+            e.id: e.name
+            for e in session.exec(
+                select(OrgEntity).where(OrgEntity.id.in_(ent_ids))
+            ).all()
+        }
+    depts: dict[int, str] = {}
+    if dept_ids:
+        depts = {
+            d.id: d.name
+            for d in session.exec(
+                select(OrgDepartment).where(OrgDepartment.id.in_(dept_ids))
+            ).all()
+        }
+    tags: dict[int, str] = {}
+    if tag_ids:
+        tags = {
+            t.id: t.name
+            for t in session.exec(
+                select(FunctionTag).where(FunctionTag.id.in_(tag_ids))
+            ).all()
+        }
+    default_users: dict[int, str] = {}
+    if role_ids:
+        default_users = {
+            u.role_id: u.username
+            for u in session.exec(
+                select(User).where(
+                    User.role_id.in_(role_ids),
+                    User.is_default == True,  # noqa: E712
+                )
+            ).all()
+        }
+
+    return {
+        "segments": segs,
+        "entities": ents,
+        "departments": depts,
+        "function_tags": tags,
+        "default_users": default_users,
+    }
 
 
-def _role_to_read(session: Session, role: Role) -> RoleRead:
-    """将角色转成带分类名称的响应模型。"""
+def _role_to_read(role: Role, lookup: dict) -> RoleRead:
+    """将角色转成带分类名称的响应模型（使用预加载的 lookup，避免 N+1）。"""
+    segs = lookup["segments"]
+    ents = lookup["entities"]
+    depts = lookup["departments"]
+    tags = lookup["function_tags"]
+    default_users = lookup["default_users"]
     return RoleRead(
         id=role.id,
         name=role.name,
         segment_id=role.segment_id,
-        segment_name=session.get(BusinessSegment, role.segment_id).name
-        if role.segment_id
-        else None,
+        segment_name=segs.get(role.segment_id) if role.segment_id else None,
         entity_id=role.entity_id,
-        entity_name=session.get(OrgEntity, role.entity_id).name
-        if role.entity_id
-        else None,
+        entity_name=ents.get(role.entity_id) if role.entity_id else None,
         department_id=role.department_id,
-        department_name=session.get(OrgDepartment, role.department_id).name
-        if role.department_id
-        else None,
+        department_name=depts.get(role.department_id) if role.department_id else None,
         function_tag_id=role.function_tag_id,
-        function_tag_name=session.get(FunctionTag, role.function_tag_id).name
-        if role.function_tag_id
-        else None,
-        default_username=_role_default_user_username(session, role),
+        function_tag_name=tags.get(role.function_tag_id) if role.function_tag_id else None,
+        default_username=default_users.get(role.id, _role_default_username(role)),
     )
 
 
@@ -183,11 +235,15 @@ def _ensure_function_tag(session: Session, function_tag_id: int | None) -> None:
 
 @router.get("/roles", response_model=list[RoleRead])
 async def list_roles(session: Session = Depends(get_session)) -> list[RoleRead]:
-    """获取系统角色列表（不含管理员角色，避免管理员误删自身），含组织分类。"""
+    """获取系统角色列表（不含管理员角色，避免管理员误删自身），含组织分类。
+
+    优化：批量预加载 org 字典与默认账号（4 次查询而非 N×5）。
+    """
     roles = session.exec(
         select(Role).where(Role.name != settings.ADMIN_ROLE_NAME).order_by(Role.id)
     ).all()
-    return [_role_to_read(session, role) for role in roles]
+    lookup = _batch_load_org_lookup(session, roles)
+    return [_role_to_read(role, lookup) for role in roles]
 
 
 @router.post("/roles", response_model=RoleRead, status_code=status.HTTP_201_CREATED)
@@ -215,7 +271,8 @@ async def create_role(
     session.commit()
     session.refresh(role)
     _ensure_role_default_user(session, role)
-    return _role_to_read(session, role)
+    lookup = _batch_load_org_lookup(session, [role])
+    return _role_to_read(role, lookup)
 
 
 @router.put("/roles/{role_id}", response_model=RoleRead)
@@ -262,7 +319,8 @@ async def update_role(
     session.add(role)
     session.commit()
     session.refresh(role)
-    return _role_to_read(session, role)
+    lookup = _batch_load_org_lookup(session, [role])
+    return _role_to_read(role, lookup)
 
 
 @router.post("/roles/{role_id}/reset-password", response_model=dict)
@@ -371,18 +429,24 @@ async def bind_templates(
     if role is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="角色不存在")
 
-    for template_id in body.template_ids:
-        template = session.get(Template, template_id)
-        if template is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"模板 {template_id} 不存在",
-            )
-        if template.archived:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"模板 {template.name} 已归档，无法绑定",
-            )
+    # 一次性校验所有 template_ids（避免 N 次 session.get）
+    if body.template_ids:
+        templates = session.exec(
+            select(Template).where(Template.id.in_(body.template_ids))
+        ).all()
+        templates_by_id = {t.id: t for t in templates}
+        for tid in body.template_ids:
+            template = templates_by_id.get(tid)
+            if template is None:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"模板 {tid} 不存在",
+                )
+            if template.archived:
+                raise HTTPException(
+                    status_code=status.HTTP_400_BAD_REQUEST,
+                    detail=f"模板 {template.name} 已归档，无法绑定",
+                )
 
     for link in session.exec(
         select(RoleTemplateMapping).where(RoleTemplateMapping.role_id == role_id)
@@ -672,24 +736,29 @@ async def get_filling_overview(
         .offset(offset)
         .limit(limit)
     ).all()
+    # 批量预加载 org 分类名（4 次 IN 查询替代 N×4 次 session.get）
+    roles_in_rows = [r for r, _t, _w in rows]
+    lookup = _batch_load_org_lookup(session, roles_in_rows)
+    segs, ents, depts, tags = (
+        lookup["segments"],
+        lookup["entities"],
+        lookup["departments"],
+        lookup["function_tags"],
+    )
     return [
         AdminBindingStatus(
             role_id=role.id,
             role_name=role.name,
             segment_id=role.segment_id,
-            segment_name=session.get(BusinessSegment, role.segment_id).name
-            if role.segment_id
-            else None,
+            segment_name=segs.get(role.segment_id) if role.segment_id else None,
             entity_id=role.entity_id,
-            entity_name=session.get(OrgEntity, role.entity_id).name
-            if role.entity_id
-            else None,
+            entity_name=ents.get(role.entity_id) if role.entity_id else None,
             department_id=role.department_id,
-            department_name=session.get(OrgDepartment, role.department_id).name
+            department_name=depts.get(role.department_id)
             if role.department_id
             else None,
             function_tag_id=role.function_tag_id,
-            function_tag_name=session.get(FunctionTag, role.function_tag_id).name
+            function_tag_name=tags.get(role.function_tag_id)
             if role.function_tag_id
             else None,
             template_id=template.id,
