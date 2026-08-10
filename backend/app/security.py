@@ -52,11 +52,11 @@ def decode_token(token: str) -> dict:
     """解码 JWT Token，校验失败时抛出 jwt.PyJWTError。
 
     - 校验 iss / aud（若 JWT_ISSUER / JWT_AUDIENCE 已配置）
-    - 容忍 ±JWT_LEEWAY_SECONDS 秒的时钟偏差
+    - 容忍 ±JWT_LEEWAY_SECONDS 秒的时钟偏差（PyJWT 2.x: leeway 是顶层 kwarg）
     """
     decode_kwargs: dict = {
         "algorithms": [settings.ALGORITHM],
-        "options": {"leeway": settings.JWT_LEEWAY_SECONDS},
+        "leeway": settings.JWT_LEEWAY_SECONDS,
     }
     if settings.JWT_AUDIENCE:
         decode_kwargs["audience"] = settings.JWT_AUDIENCE

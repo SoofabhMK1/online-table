@@ -13,6 +13,6 @@ def check_snapshot_size(snapshot: dict) -> None:
     size = len(json.dumps(snapshot, ensure_ascii=False, default=str).encode("utf-8"))
     if size > settings.MAX_SNAPSHOT_BYTES:
         raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
+            status_code=status.HTTP_413_CONTENT_TOO_LARGE,
             detail=f"快照过大（{size} 字节 > {settings.MAX_SNAPSHOT_BYTES}），请精简表格内容",
         )
