@@ -1,13 +1,9 @@
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from sqlalchemy.exc import IntegrityError
 from sqlmodel import Session, select
 
-import json
-
-from app.config import settings
 from app.database import get_session
 from app.dependencies import get_current_user
 from app.models import FillingPeriod, RoleTemplateMapping, RoleWorkbook, Template, User
@@ -17,18 +13,14 @@ from app.schemas import (
     WorkspaceTemplateDetail,
     WorkspaceTemplateItem,
 )
+from app.services import template_service, workbook_service
 
 router = APIRouter(prefix="/api/workspace", tags=["workspace"])
 
 
 def _check_snapshot_size(snapshot: dict) -> None:
-    """序列化后超 MAX_SNAPSHOT_BYTES 即拒绝（413）。"""
-    size = len(json.dumps(snapshot, ensure_ascii=False, default=str).encode("utf-8"))
-    if size > settings.MAX_SNAPSHOT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"快照过大（{size} 字节 > {settings.MAX_SNAPSHOT_BYTES}），请精简表格内容",
-        )
+    """重导出 template_service.check_snapshot_size。"""
+    return template_service.check_snapshot_size(snapshot)
 
 
 def _is_period_locked(session: Session, period: str) -> bool:
@@ -40,75 +32,23 @@ def _is_period_locked(session: Session, period: str) -> bool:
 
 
 def _validate_content_numeric(snapshot: dict, template: Template) -> None:
-    """内容区仅允许数字：校验内容区矩形内非空单元格必须为数值，否则抛出 400。"""
-    if not template.content_numeric:
-        return
-    if template.content_rows <= 0 or template.content_cols <= 0:
-        return
-    sheets = snapshot.get("sheets", {}) or {}
-    invalid_cells: list[str] = []
-    # 遍历所有 sheet 的内容区矩形
-    for sheet_name, sheet in sheets.items():
-        if not isinstance(sheet, dict):
-            continue
-        cell_data = sheet.get("cellData", {}) or {}
-        for row, col in _iter_content_area(template):
-            row_data = cell_data.get(str(row))
-            if not isinstance(row_data, dict):
-                continue
-            cell = row_data.get(str(col))
-            if not isinstance(cell, dict) or cell.get("v") in (None, ""):
-                continue
-            value = cell.get("v")
-            if not _is_numeric(value):
-                col_letter = _col_index_to_letter(col)
-                invalid_cells.append(f"{col_letter}{row + 1}")
-    if invalid_cells:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"单元格 {'、'.join(invalid_cells)} 需为数字",
-        )
+    """重导出 workbook_service.validate_content_numeric。"""
+    return workbook_service.validate_content_numeric(snapshot, template)
 
 
 def _iter_content_area(template: Template):
-    """生成内容区矩形内的 (row, col) 坐标（行列从 0 开始）。"""
-    for row in range(
-        template.col_label_rows,
-        template.col_label_rows + template.content_rows,
-    ):
-        for col in range(
-            template.row_label_cols,
-            template.row_label_cols + template.content_cols,
-        ):
-            yield row, col
+    """重导出 workbook_service.iter_content_area。"""
+    return workbook_service.iter_content_area(template)
 
 
 def _is_numeric(value) -> bool:
-    """校验单元格值是否为数值（允许千分位逗号与正负号；不允许任意位置逗号）。
-
-    与 frontend/utils/validateContent.ts 保持同逻辑：
-    - 整数 / 浮点（含负数、小数）：通过
-    - 千分位逗号：1,234,567.89 通过；1,2 / 1,2,3 拒绝（避免歧义）
-    - 空串 / 空值：放行（由外层 caller 跳过）
-    """
-    if isinstance(value, bool):
-        return False
-    if isinstance(value, (int, float)):
-        return True
-    if isinstance(value, str):
-        import re
-        return bool(re.fullmatch(r"-?\d{1,3}(,\d{3})+(\.\d+)?|-?\d+(\.\d+)?", value.strip()))
-    return False
+    """重导出 workbook_service.is_numeric。"""
+    return workbook_service.is_numeric(value)
 
 
 def _col_index_to_letter(col: int) -> str:
-    """将 0 起始列号转换为 Excel 列字母（0 -> A）。"""
-    letters = ""
-    n = col + 1
-    while n > 0:
-        n, remainder = divmod(n - 1, 26)
-        letters = chr(65 + remainder) + letters
-    return letters
+    """重导出 workbook_service.col_index_to_letter。"""
+    return workbook_service.col_index_to_letter(col)
 
 
 def _ensure_template_allowed(
@@ -125,7 +65,12 @@ def _ensure_template_allowed(
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN, detail="无权访问该模板"
         )
-    return session.get(Template, template_id)
+    template = session.get(Template, template_id)
+    if template is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND, detail="模板不存在"
+        )
+    return template
 
 
 def _get_workbook(

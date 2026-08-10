@@ -1,4 +1,3 @@
-import json
 from datetime import datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -15,6 +14,7 @@ from app.schemas import (
     TemplateRead,
     TemplateUpdate,
 )
+from app.services import template_service
 
 router = APIRouter(
     prefix="/api/templates", tags=["templates"], dependencies=[Depends(get_current_admin)]
@@ -22,13 +22,8 @@ router = APIRouter(
 
 
 def _check_snapshot_size(snapshot: dict) -> None:
-    """序列化后超 MAX_SNAPSHOT_BYTES 即拒绝（413），避免恶意大 JSON 触发 OOM。"""
-    size = len(json.dumps(snapshot, ensure_ascii=False, default=str).encode("utf-8"))
-    if size > settings.MAX_SNAPSHOT_BYTES:
-        raise HTTPException(
-            status_code=status.HTTP_413_REQUEST_ENTITY_TOO_LARGE,
-            detail=f"快照过大（{size} 字节 > {settings.MAX_SNAPSHOT_BYTES}），请精简模板内容",
-        )
+    """重导出 template_service.check_snapshot_size。"""
+    return template_service.check_snapshot_size(snapshot)
 
 
 @router.post("", response_model=TemplateDetail, status_code=status.HTTP_201_CREATED)
