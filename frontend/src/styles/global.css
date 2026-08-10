@@ -1,0 +1,71 @@
+:root {
+  --ot-color-primary: #2d5bff;
+  --ot-color-primary-hover: #1e47e0;
+  --ot-color-primary-active: #1739c7;
+  --ot-color-primary-soft: #eef2ff;
+  --ot-color-primary-soft-hover: #e0e7ff;
+
+  --ot-color-text: #0f172a;
+  --ot-color-text-secondary: #475569;
+  --ot-color-text-tertiary: #94a3b8;
+  --ot-color-text-quaternary: #cbd5e1;
+
+  --ot-color-border: #e5e7eb;
+  --ot-color-border-subtle: #f1f5f9;
+  --ot-color-bg: #f7f8fa;
+  --ot-color-bg-hover: #f1f5f9;
+  --ot-color-surface: #ffffff;
+  --ot-color-surface-hover: #f8fafc;
+
+  --ot-color-success: #10b981;
+  --ot-color-warning: #ea8c00;
+  --ot-color-danger: #ef4444;
+  --ot-color-info: #2d5bff;
+  --ot-color-muted: #94a3b8;
+
+  --ot-color-status-draft: #2d5bff;
+  --ot-color-status-submitted: #ea8c00;
+  --ot-color-status-approved: #10b981;
+  --ot-color-status-rejected: #ef4444;
+  --ot-color-status-none: #94a3b8;
+
+  --ot-radius-sm: 6px;
+  --ot-radius-md: 8px;
+  --ot-radius-lg: 12px;
+  --ot-radius-xl: 16px;
+  --ot-radius-full: 999px;
+
+  --ot-shadow-sm: 0 1px 2px 0 rgba(15, 23, 42, 0.04),
+    0 1px 3px 0 rgba(15, 23, 42, 0.06);
+  --ot-shadow-md: 0 4px 16px -4px rgba(15, 23, 42, 0.08),
+    0 2px 6px -2px rgba(15, 23, 42, 0.04);
+  --ot-shadow-lg: 0 20px 60px -12px rgba(15, 23, 42, 0.18),
+    0 8px 24px -8px rgba(15, 23, 42, 0.08);
+
+  --ot-space-1: 4px;
+  --ot-space-2: 8px;
+  --ot-space-3: 12px;
+  --ot-space-4: 16px;
+  --ot-space-5: 20px;
+  --ot-space-6: 24px;
+  --ot-space-7: 28px;
+  --ot-space-8: 32px;
+  --ot-space-10: 40px;
+  --ot-space-12: 48px;
+  --ot-space-16: 64px;
+
+  --ot-sidebar-width: 240px;
+  --ot-sidebar-collapsed-width: 64px;
+  --ot-topbar-height: 60px;
+
+  --ot-font-sans: system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue',
+    Arial, 'PingFang SC', 'Microsoft YaHei', sans-serif;
+  --ot-font-mono: ui-monospace, SFMono-Regular, 'JetBrains Mono', Menlo,
+    Consolas, monospace;
+
+  --ot-ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ot-ease-in-out: cubic-bezier(0.65, 0, 0.35, 1);
+  --ot-duration-fast: 120ms;
+  --ot-duration-mid: 180ms;
+  --ot-duration-slow: 280ms;
+}

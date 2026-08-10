@@ -1,8 +1,4 @@
-/**
- * TemplatePanel：模板管理 Tab 内容（active 列表 + create / edit / import / duplicate 模态框）。
- * 归档列表见 ArchivedTemplatePanel，二者共用 useTemplates hook。
- */
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   App,
   Button,
@@ -30,19 +26,21 @@ import {
   UploadOutlined,
 } from '@ant-design/icons'
 import type { IWorkbookData } from '@univerjs/core'
-import UniverSheet, { type UniverSheetHandle } from '../../../components/UniverSheet'
+import UniverSheet, { type UniverSheetHandle } from '../../components/UniverSheet'
 import {
   createTemplate,
   duplicateTemplate,
   fetchTemplateDetail,
   updateTemplate,
   type TemplateLabelConfig,
-} from '../../../api/admin'
-import type { TemplateItem } from '../../../api/types'
-import { snapshotToXlsx, xlsxToSnapshot } from '../../../utils/excelBridge'
-import { computeUsedRange, type UsedRange } from '../../../utils/usedRange'
-import { formatCell, formatRange, parseCellRef } from '../../../utils/cellRef'
-import { useTemplatesStore } from '../../../store/useTemplatesStore'
+} from '../../api/admin'
+import type { TemplateItem } from '../../api/types'
+import { snapshotToXlsx, xlsxToSnapshot } from '../../utils/excelBridge'
+import { computeUsedRange, type UsedRange } from '../../utils/usedRange'
+import { formatCell, formatRange, parseCellRef } from '../../utils/cellRef'
+import { useTemplatesStore } from '../../store/useTemplatesStore'
+import PageHeader from '../../components/layout/PageHeader'
+import EmptyState from '../../components/feedback/EmptyState'
 
 interface TemplateFormValues {
   name: string
@@ -60,7 +58,6 @@ interface DerivedLabels {
   dataRange: string
 }
 
-/** 根据数据区域起始单元格与使用区域，推算行标签/列标签/内容区。 */
 function deriveLabels(
   start: { row: number; col: number } | null,
   used: UsedRange | null,
@@ -71,9 +68,13 @@ function deriveLabels(
   const contentRows = Math.max(0, used.endRow - start.row + 1)
   const contentCols = Math.max(0, used.endCol - start.col + 1)
   const rowLabelRange =
-    rowLabelCols > 0 ? formatRange(start.row, 0, used.endRow, start.col - 1) : null
+    rowLabelCols > 0
+      ? formatRange(start.row, 0, used.endRow, start.col - 1)
+      : null
   const colLabelRange =
-    colLabelRows > 0 ? formatRange(0, 0, start.row - 1, used.endCol) : null
+    colLabelRows > 0
+      ? formatRange(0, 0, start.row - 1, used.endCol)
+      : null
   const dataRange = formatRange(start.row, start.col, used.endRow, used.endCol)
   return {
     rowLabelCols,
@@ -86,7 +87,7 @@ function deriveLabels(
   }
 }
 
-export default function TemplatePanel() {
+export default function TemplatesPage() {
   const { message } = App.useApp()
   const templates = useTemplatesStore((s) => s.templates)
   const loading = useTemplatesStore((s) => s.loading)
@@ -95,11 +96,12 @@ export default function TemplatePanel() {
   const [archivingId, setArchivingId] = useState<number | null>(null)
   const [exportingId, setExportingId] = useState<number | null>(null)
 
-  // 创建/编辑模板
   const [modalOpen, setModalOpen] = useState(false)
   const [editingId, setEditingId] = useState<number | null>(null)
   const [sheetMounted, setSheetMounted] = useState(false)
-  const [initialSnapshot, setInitialSnapshot] = useState<IWorkbookData | undefined>(undefined)
+  const [initialSnapshot, setInitialSnapshot] = useState<
+    IWorkbookData | undefined
+  >(undefined)
   const [saving, setSaving] = useState(false)
   const [dataStartCell, setDataStartCell] = useState('')
   const [usedRange, setUsedRange] = useState<UsedRange | null>(null)
@@ -107,10 +109,17 @@ export default function TemplatePanel() {
   const [form] = Form.useForm<TemplateFormValues>()
   const [importing, setImporting] = useState(false)
 
-  // 复制模板
+  useEffect(() => {
+    void fetchActive()
+  }, [fetchActive])
+
   const [duplicateOpen, setDuplicateOpen] = useState(false)
-  const [duplicateTargetId, setDuplicateTargetId] = useState<number | null>(null)
-  const [duplicateYear, setDuplicateYear] = useState(new Date().getFullYear() + 1)
+  const [duplicateTargetId, setDuplicateTargetId] = useState<number | null>(
+    null,
+  )
+  const [duplicateYear, setDuplicateYear] = useState(
+    new Date().getFullYear() + 1,
+  )
   const [duplicateCopyBindings, setDuplicateCopyBindings] = useState(true)
   const [duplicating, setDuplicating] = useState(false)
 
@@ -150,58 +159,67 @@ export default function TemplatePanel() {
     }
   }
 
-  const handleExportTemplate = async (template: TemplateItem) => {
-    setExportingId(template.id)
-    try {
-      const detail = await fetchTemplateDetail(template.id)
-      await snapshotToXlsx(
-        detail.snapshot as unknown as IWorkbookData,
-        `${template.name}.xlsx`,
-      )
-      message.success(`已导出「${template.name}.xlsx」`)
-    } catch {
-      message.error('导出模板失败')
-    } finally {
-      setExportingId(null)
-    }
-  }
+  const handleExportTemplate = useCallback(
+    async (template: TemplateItem) => {
+      setExportingId(template.id)
+      try {
+        const detail = await fetchTemplateDetail(template.id)
+        await snapshotToXlsx(
+          detail.snapshot as unknown as IWorkbookData,
+          `${template.name}.xlsx`,
+        )
+        message.success(`已导出「${template.name}.xlsx」`)
+      } catch {
+        message.error('导出模板失败')
+      } finally {
+        setExportingId(null)
+      }
+    },
+    [message],
+  )
 
-  const handleArchiveTemplate = async (template: TemplateItem) => {
-    setArchivingId(template.id)
-    try {
-      await archive(template.id)
-      message.success(`模板「${template.name}」已归档`)
-    } catch {
-      message.error('归档失败')
-    } finally {
-      setArchivingId(null)
-    }
-  }
+  const handleArchiveTemplate = useCallback(
+    async (template: TemplateItem) => {
+      setArchivingId(template.id)
+      try {
+        await archive(template.id)
+        message.success(`模板「${template.name}」已归档`)
+      } catch {
+        message.error('归档失败')
+      } finally {
+        setArchivingId(null)
+      }
+    },
+    [archive, message],
+  )
 
-  const openEdit = async (template: TemplateItem) => {
-    try {
-      const detail = await fetchTemplateDetail(template.id)
-      const snapshot = detail.snapshot as unknown as IWorkbookData
-      setEditingId(template.id)
-      setInitialSnapshot(snapshot)
-      setDataStartCell(formatCell(detail.col_label_rows, detail.row_label_cols))
-      setUsedRange(computeUsedRange(snapshot))
-      form.setFieldsValue({
-        name: detail.name,
-        year: detail.year,
-        contentNumeric: detail.content_numeric,
-      })
-      setModalOpen(true)
-    } catch {
-      message.error('加载模板详情失败')
-    }
-  }
+  const openEdit = useCallback(
+    async (template: TemplateItem) => {
+      try {
+        const detail = await fetchTemplateDetail(template.id)
+        const snapshot = detail.snapshot as unknown as IWorkbookData
+        setEditingId(template.id)
+        setInitialSnapshot(snapshot)
+        setDataStartCell(
+          formatCell(detail.col_label_rows, detail.row_label_cols),
+        )
+        setUsedRange(computeUsedRange(snapshot))
+        form.setFieldsValue({
+          name: detail.name,
+          year: detail.year,
+          contentNumeric: detail.content_numeric,
+        })
+        setModalOpen(true)
+      } catch {
+        message.error('加载模板详情失败')
+      }
+    },
+    [form, message],
+  )
 
   const refreshUsedRange = (notify: boolean) => {
     const snapshot = sheetRef.current?.getWorkbookData() ?? initialSnapshot
-    if (!snapshot) {
-      return
-    }
+    if (!snapshot) return
     const used = computeUsedRange(snapshot)
     setUsedRange(used)
     if (notify) {
@@ -286,9 +304,7 @@ export default function TemplatePanel() {
   }
 
   const handleDuplicate = async () => {
-    if (duplicateTargetId == null) {
-      return
-    }
+    if (duplicateTargetId == null) return
     setDuplicating(true)
     try {
       const detail = await duplicateTemplate(duplicateTargetId, {
@@ -305,93 +321,174 @@ export default function TemplatePanel() {
     }
   }
 
-  const columns: TableColumnsType<TemplateItem> = [
-    { title: 'ID', dataIndex: 'id', width: 70 },
-    { title: '模板名称', dataIndex: 'name' },
-    { title: '年份', dataIndex: 'year', width: 80 },
-    {
-      title: '数字校验',
-      width: 100,
-      render: (_, record) =>
-        record.content_numeric ? <Tag color="gold">仅数字</Tag> : '-',
-    },
-    {
-      title: '操作',
-      width: 300,
-      render: (_, record) => (
-        <Space size={0} wrap>
-          <Button type="link" size="small" onClick={() => void openEdit(record)}>
-            编辑
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<CopyOutlined />}
-            onClick={() => openDuplicate(record)}
-          >
-            复制
-          </Button>
-          <Button
-            type="link"
-            size="small"
-            icon={<DownloadOutlined />}
-            loading={exportingId === record.id}
-            onClick={() => void handleExportTemplate(record)}
-          >
-            导出
-          </Button>
-          <Popconfirm
-            title={`确认归档模板「${record.name}」？`}
-            description="归档后将从工作台、填报总览与绑定列表中隐藏（历史填报数据保留），可在「归档模板」中恢复。"
-            onConfirm={() => void handleArchiveTemplate(record)}
-          >
+  const columns: TableColumnsType<TemplateItem> = useMemo(
+    () => [
+      {
+        title: 'ID',
+        dataIndex: 'id',
+        width: 70,
+        render: (v: number) => (
+          <span className="ot-mono" style={{ color: 'var(--ot-color-text-tertiary)' }}>
+            #{v}
+          </span>
+        ),
+      },
+      {
+        title: '模板名称',
+        dataIndex: 'name',
+        render: (v: string, r) => (
+          <div>
+            <div style={{ fontWeight: 500 }}>{v}</div>
+            {r.content_numeric && (
+              <Tag
+                color="gold"
+                style={{ marginTop: 4, fontSize: 11, padding: '0 6px' }}
+              >
+                仅数字
+              </Tag>
+            )}
+          </div>
+        ),
+      },
+      {
+        title: '年份',
+        dataIndex: 'year',
+        width: 80,
+        render: (v: number) => (
+          <Tag style={{ borderRadius: 6, fontVariantNumeric: 'tabular-nums' }}>
+            {v}
+          </Tag>
+        ),
+      },
+      {
+        title: '区域',
+        width: 140,
+        render: (_, r) => (
+          <span className="ot-mono" style={{ fontSize: 12, color: 'var(--ot-color-text-secondary)' }}>
+            {r.col_label_rows > 0 || r.row_label_cols > 0
+              ? `标签 ${r.row_label_cols}/${r.col_label_rows}`
+              : '—'}
+          </span>
+        ),
+      },
+      {
+        title: '操作',
+        width: 320,
+        render: (_, record) => (
+          <Space size={0} wrap>
+            <Button type="link" size="small" onClick={() => void openEdit(record)}>
+              编辑
+            </Button>
             <Button
               type="link"
               size="small"
-              danger
-              icon={<InboxOutlined />}
-              loading={archivingId === record.id}
+              icon={<CopyOutlined />}
+              onClick={() => openDuplicate(record)}
             >
-              归档
+              复制
             </Button>
-          </Popconfirm>
-        </Space>
-      ),
-    },
-  ]
+            <Button
+              type="link"
+              size="small"
+              icon={<DownloadOutlined />}
+              loading={exportingId === record.id}
+              onClick={() => void handleExportTemplate(record)}
+            >
+              导出
+            </Button>
+            <Popconfirm
+              title={`确认归档模板「${record.name}」？`}
+              description="归档后将从工作台、填报总览与绑定列表中隐藏（历史填报数据保留），可在「归档模板」中恢复。"
+              onConfirm={() => void handleArchiveTemplate(record)}
+            >
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<InboxOutlined />}
+                loading={archivingId === record.id}
+              >
+                归档
+              </Button>
+            </Popconfirm>
+          </Space>
+        ),
+      },
+    ],
+    [archivingId, exportingId, openEdit, handleExportTemplate, handleArchiveTemplate],
+  )
 
   return (
-    <>
-      <Space orientation="vertical" style={{ width: '100%' }} size="large">
-        <Space wrap>
-          <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
-            新建模板
-          </Button>
-          <Upload
-            accept=".xlsx,.xls"
-            showUploadList={false}
-            customRequest={({ file }) => {
-              if (file instanceof File) {
-                void handleImportFile(file)
-              }
-            }}
-          >
-            <Button icon={<UploadOutlined />} loading={importing}>
-              导入模板
+    <div className="ot-fade-in">
+      <PageHeader
+        eyebrow="管理中心"
+        title="模板管理"
+        description="新建 / 编辑 Excel 模板，指定「数据区域起始单元格」自动推算标签区与内容区。"
+        actions={
+          <Space wrap>
+            <Button
+              type="primary"
+              icon={<PlusOutlined />}
+              onClick={openCreate}
+            >
+              新建模板
             </Button>
-          </Upload>
-          <Typography.Text type="secondary">
-            导入 Excel（仅取第一张工作表，自动处理合并单元格与样式），随后在弹窗中确认名称/年份/标签区。
-          </Typography.Text>
-        </Space>
-        <Table
-          rowKey="id"
-          columns={columns}
-          dataSource={templates}
-          loading={loading}
-          pagination={false}
-        />
-      </Space>
+            <Upload
+              accept=".xlsx,.xls"
+              showUploadList={false}
+              customRequest={({ file }) => {
+                if (file instanceof File) {
+                  void handleImportFile(file)
+                }
+              }}
+            >
+              <Button icon={<UploadOutlined />} loading={importing}>
+                导入模板
+              </Button>
+            </Upload>
+          </Space>
+        }
+      />
+
+      <Card
+          styles={{ body: { padding: 0 } }}
+          style={{ borderRadius: 12 }}
+      >
+        {templates.length === 0 && !loading ? (
+          <EmptyState
+            variant="templates"
+            title="还没有模板"
+            description="先新建一个模板，或导入现成的 Excel（仅取第一张工作表，自动处理合并单元格与样式）"
+            action={
+              <Space>
+                <Button type="primary" icon={<PlusOutlined />} onClick={openCreate}>
+                  新建模板
+                </Button>
+                <Upload
+                  accept=".xlsx,.xls"
+                  showUploadList={false}
+                  customRequest={({ file }) => {
+                    if (file instanceof File) {
+                      void handleImportFile(file)
+                    }
+                  }}
+                >
+                  <Button icon={<UploadOutlined />}>导入 Excel</Button>
+                </Upload>
+              </Space>
+            }
+          />
+        ) : (
+          <Table<TemplateItem>
+            rowKey="id"
+            columns={columns}
+            dataSource={templates}
+            loading={loading}
+            pagination={false}
+            className="ot-cv-auto"
+          />
+        )}
+      </Card>
 
       <Modal
         title={editingId === null ? '新建模板' : '编辑模板'}
@@ -421,7 +518,7 @@ export default function TemplatePanel() {
               label="模板名称"
               rules={[{ required: true, message: '请输入模板名称' }]}
             >
-              <Input placeholder="例如：费用报销表" style={{ width: 240 }} />
+              <Input id="name" placeholder="例如：费用报销表" style={{ width: 240 }} />
             </Form.Item>
             <Form.Item
               name="year"
@@ -442,7 +539,10 @@ export default function TemplatePanel() {
                   style={{ width: 160 }}
                   onPressEnter={() => refreshUsedRange(true)}
                 />
-                <Button icon={<ThunderboltOutlined />} onClick={() => refreshUsedRange(true)}>
+                <Button
+                  icon={<ThunderboltOutlined />}
+                  onClick={() => refreshUsedRange(true)}
+                >
                   检测使用区域
                 </Button>
               </Space.Compact>
@@ -456,34 +556,57 @@ export default function TemplatePanel() {
               <Switch />
             </Form.Item>
           </Space>
-          <Card size="small" style={{ marginBottom: 8, background: '#fafafa' }}>
+          <Card
+            size="small"
+            styles={{ body: { padding: 16 } }}
+            style={{
+              marginBottom: 8,
+              background: 'var(--ot-color-bg)',
+              borderColor: 'var(--ot-color-border)',
+            }}
+          >
             <Space orientation="vertical" size={4}>
               <Typography.Text>
                 使用区域：
                 {usedRange
-                  ? formatRange(usedRange.startRow, usedRange.startCol, usedRange.endRow, usedRange.endCol)
+                  ? formatRange(
+                      usedRange.startRow,
+                      usedRange.startCol,
+                      usedRange.endRow,
+                      usedRange.endCol,
+                    )
                   : '（点击「检测使用区域」从表格内容计算）'}
               </Typography.Text>
               <Typography.Text>
                 行标签范围：
                 {derived?.rowLabelRange ? (
-                  <Tag>{derived.rowLabelRange}</Tag>
+                  <Tag style={{ marginLeft: 4 }}>{derived.rowLabelRange}</Tag>
                 ) : (
                   <Typography.Text type="secondary">无</Typography.Text>
                 )}
                 　列标签范围：
                 {derived?.colLabelRange ? (
-                  <Tag>{derived.colLabelRange}</Tag>
+                  <Tag style={{ marginLeft: 4 }}>{derived.colLabelRange}</Tag>
                 ) : (
                   <Typography.Text type="secondary">无</Typography.Text>
                 )}
               </Typography.Text>
               <Typography.Text>
-                数据区域（用户可填写）：{derived ? <Tag color="blue">{derived.dataRange}</Tag> : '（请先填写起始单元格）'}
+                数据区域（用户可填写）：
+                {derived ? (
+                  <Tag color="blue" style={{ marginLeft: 4 }}>
+                    {derived.dataRange}
+                  </Tag>
+                ) : (
+                  '（请先填写起始单元格）'
+                )}
               </Typography.Text>
             </Space>
           </Card>
-          <Typography.Text type="secondary" style={{ display: 'block', marginBottom: 8 }}>
+          <Typography.Text
+            type="secondary"
+            style={{ display: 'block', marginBottom: 8 }}
+          >
             系统会根据「使用区域」与数据区域起始单元格自动推算：起始单元格左侧为行标签、上方为列标签、右下为内容区（内容区之外一律只读）。
           </Typography.Text>
         </Form>
@@ -529,6 +652,6 @@ export default function TemplatePanel() {
           </Typography.Text>
         </Space>
       </Modal>
-    </>
+    </div>
   )
 }

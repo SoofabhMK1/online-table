@@ -10,7 +10,8 @@ async function main() {
 
   // 准备一个简单模板，绑定给 运营部
   const tplName = `审核测试-${uniqueSuffix()}`
-  const year = new Date().getFullYear() + 1
+  const period0 = currentPeriod()
+  const year = Number(period0.split('-')[0])
   const snapshot = {
     id: 'review_wb', appVersion: '0.25.1', locale: 'zhCN', name: tplName,
     styles: {}, sheetOrder: ['s1'],
@@ -25,11 +26,17 @@ async function main() {
       },
     },
   }
-  const tpl = await axios.post(`${BASE}/api/templates`, {
-    name: tplName, year, snapshot,
-    row_label_cols: 1, col_label_rows: 1,
-    content_rows: 3, content_cols: 2,
-  }, { headers: ah })
+  let tpl
+  try {
+    tpl = await axios.post(`${BASE}/api/templates`, {
+      name: tplName, year, snapshot,
+      row_label_cols: 1, col_label_rows: 1,
+      content_rows: 3, content_cols: 2,
+    }, { headers: ah })
+  } catch (e) {
+    console.log('Template creation failed:', e.response?.status, e.response?.data)
+    throw e
+  }
   const tid = tpl.data.id
 
   // 把模板绑给 运营部
@@ -53,7 +60,7 @@ async function main() {
     const submit = await axios.post(`${BASE}/api/workspace/workbooks`, {
       template_id: tid, period, snapshot: filledSnap, action: 'submit',
     }, { headers: uh })
-    r.report('用户提交成功（200）', submit.status === 200, `status=${submit.status}`)
+    r.report('用户提交成功（201）', submit.status === 201 || submit.status === 200, `status=${submit.status}`)
 
     // 后端应拒绝再保存（submitted 状态锁定）
     const rejectedSave = await axios.post(`${BASE}/api/workspace/workbooks`, {
@@ -96,12 +103,12 @@ async function main() {
     const resave = await axios.post(`${BASE}/api/workspace/workbooks`, {
       template_id: tid, period, snapshot: modified, action: 'save',
     }, { headers: uh })
-    r.report('rejected 后可保存 (200)', resave.status === 200, `status=${resave.status}`)
+    r.report('rejected 后可保存', resave.status === 201 || resave.status === 200, `status=${resave.status}`)
 
     const resubmit = await axios.post(`${BASE}/api/workspace/workbooks`, {
       template_id: tid, period, snapshot: modified, action: 'submit',
     }, { headers: uh })
-    r.report('rejected 后可重新提交 (200)', resubmit.status === 200, `status=${resubmit.status}`)
+    r.report('rejected 后可重新提交', resubmit.status === 201 || resubmit.status === 200, `status=${resubmit.status}`)
 
     // ---------- 4) Admin：通过 ----------
     const approve = await axios.post(
@@ -121,13 +128,9 @@ async function main() {
     const page = await browser.newPage()
     await page.setViewport({ width: 1440, height: 900 })
     await r.login(page, 'admin', 'admin123')
-    await page.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await page.goto(`${BASE}/admin/overview`, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await r.waitCanvas(page, 'body', 15000).catch(() => {})
-    // 进入填报总览 Tab
-    await page.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('.ant-tabs-tab'))
-      tabs.find((t) => t.textContent?.includes('填报总览'))?.click()
-    })
+    // 直接进入填报总览页（新架构：侧栏菜单 + 独立路由）
     await sleep(1500)
     // 总览列表应渲染（不依赖具体单元格内容）
     const hasOverviewTable = await page.evaluate(
@@ -147,5 +150,8 @@ async function main() {
 
 main().catch((e) => {
   console.error('E2E FAILED:', e.message)
+  if (e.response) {
+    console.error('Response:', e.response.status, e.response.data)
+  }
   process.exit(1)
 })

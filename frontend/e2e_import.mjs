@@ -52,8 +52,8 @@ async function main() {
     await page.setViewport({ width: 1440, height: 900 })
 
     await r.login(page, 'admin', 'admin123')
-    await page.goto(`${BASE}/admin`, { waitUntil: 'domcontentloaded', timeout: 60000 })
-    await r.gotoWithRetry(page, `${BASE}/admin`, '.ant-tabs')
+    await page.goto(`${BASE}/admin/templates`, { waitUntil: 'domcontentloaded', timeout: 60000 })
+    await r.gotoWithRetry(page, `${BASE}/admin/templates`, '.ant-menu')
 
     const tplName = `导入模板${uniqueSuffix()}`
 
@@ -123,11 +123,8 @@ async function main() {
     )
     r.report('归档后从未归档列表消失', goneFromActive)
 
-    // 归档模板 Tab：恢复
-    await page.evaluate(() => {
-      const tabs = Array.from(document.querySelectorAll('.ant-tabs-tab'))
-      tabs.find((t) => t.textContent?.includes('归档模板'))?.click()
-    })
+    // 归档模板页：恢复
+    await page.goto(`${BASE}/admin/archived`, { waitUntil: 'domcontentloaded', timeout: 60000 })
     await sleep(1500)
     const inArchived = await page.evaluate(
       (name) => Array.from(document.querySelectorAll('.ant-table-tbody tr')).some((tr) => tr.textContent?.includes(name)),

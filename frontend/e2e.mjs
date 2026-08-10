@@ -20,8 +20,8 @@ async function main() {
   try {
     // ---------- 管理端 ----------
     await r.login(page, 'admin', 'admin123')
-    await r.gotoWithRetry(page, `${BASE}/admin`, '.ant-tabs')
-    r.report('管理端登录并进入 /admin', true)
+    await r.gotoWithRetry(page, `${BASE}/admin/templates`, '.ant-menu')
+    r.report('管理端登录并进入 /admin/templates', true)
 
     await page.click('.ant-btn-primary')
     await r.waitCanvas(page, CREATE_MODAL, 15000)

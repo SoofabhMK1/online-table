@@ -1,6 +1,6 @@
 import { Navigate } from 'react-router-dom'
-import { useAuthStore } from '../store/useAuthStore'
-import { ADMIN_ROLE_NAME } from '../constants'
+import { useAuthStore } from '../../store/useAuthStore'
+import { ADMIN_ROLE_NAME } from '../../constants'
 
 /** 根路径跳转：已登录按角色分流，未登录去登录页。 */
 export default function RootRedirect() {

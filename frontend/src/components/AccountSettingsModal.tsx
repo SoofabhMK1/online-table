@@ -71,6 +71,7 @@ export default function AccountSettingsModal({
       cancelText="取消"
       confirmLoading={submitting}
       destroyOnHidden
+      width={460}
     >
       <Form
         form={form}
@@ -100,9 +101,7 @@ export default function AccountSettingsModal({
           name="newPassword"
           label="新密码"
           tooltip="留空表示不修改密码。"
-          rules={[
-            { min: 6, message: '新密码长度至少 6 位' },
-          ]}
+          rules={[{ min: 6, message: '新密码长度至少 6 位' }]}
         >
           <Input.Password placeholder="留空则不修改，长度至少 6 位" />
         </Form.Item>

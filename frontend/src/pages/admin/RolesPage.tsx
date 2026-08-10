@@ -1,8 +1,4 @@
-/**
- * RolePanel：角色管理 Tab 内容（角色列表 + 新增/编辑/删除/重置密码）。
- * 模板权限 Transfer 见 PermissionPanel，二者共用 useRoles hook。
- */
-import { useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
   App,
   Button,
@@ -23,8 +19,11 @@ import {
   PlusOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
-import type { RoleCreateRequest, RoleItem } from '../../../api/types'
-import { useRolesStore } from '../../../store/useRolesStore'
+import type { RoleCreateRequest, RoleItem } from '../../api/types'
+import { useRolesStore } from '../../store/useRolesStore'
+import PageHeader from '../../components/layout/PageHeader'
+import EmptyState from '../../components/feedback/EmptyState'
+import ConfirmDialog from '../../components/feedback/ConfirmDialog'
 
 interface RoleFormValues {
   name: string
@@ -34,12 +33,13 @@ interface RoleFormValues {
   tagId?: number
 }
 
-export default function RolePanel() {
+export default function RolesPage() {
   const { message } = App.useApp()
   const roles = useRolesStore((s) => s.roles)
   const orgTree = useRolesStore((s) => s.orgTree)
   const orgLoading = useRolesStore((s) => s.orgLoading)
   const fetchOrgTree = useRolesStore((s) => s.fetchOrgTree)
+  const fetchRoles = useRolesStore((s) => s.fetchRoles)
   const create = useRolesStore((s) => s.create)
   const update = useRolesStore((s) => s.update)
   const remove = useRolesStore((s) => s.remove)
@@ -55,7 +55,10 @@ export default function RolePanel() {
   const [deleteRoleTarget, setDeleteRoleTarget] = useState<RoleItem | null>(null)
   const [deleteRoleNameInput, setDeleteRoleNameInput] = useState('')
 
-  // 打开弹窗前预加载组织架构
+  useEffect(() => {
+    void fetchRoles()
+  }, [fetchRoles])
+
   useEffect(() => {
     if (roleModalOpen) {
       void fetchOrgTree()
@@ -84,17 +87,20 @@ export default function RolePanel() {
     setRoleModalOpen(true)
   }
 
-  const openEditRole = (role: RoleItem) => {
-    setEditingRole(role)
-    roleForm.setFieldsValue({
-      name: role.name,
-      segmentId: role.segment_id ?? undefined,
-      entityId: role.entity_id ?? undefined,
-      departmentId: role.department_id ?? undefined,
-      tagId: role.function_tag_id ?? undefined,
-    })
-    setRoleModalOpen(true)
-  }
+  const openEditRole = useCallback(
+    (role: RoleItem) => {
+      setEditingRole(role)
+      roleForm.setFieldsValue({
+        name: role.name,
+        segmentId: role.segment_id ?? undefined,
+        entityId: role.entity_id ?? undefined,
+        departmentId: role.department_id ?? undefined,
+        tagId: role.function_tag_id ?? undefined,
+      })
+      setRoleModalOpen(true)
+    },
+    [roleForm],
+  )
 
   const handleRoleFormChange = (changed: Partial<RoleFormValues>) => {
     if ('segmentId' in changed) {
@@ -139,6 +145,7 @@ export default function RolePanel() {
       await remove(roleId, confirmName)
       message.success('角色已删除（默认账号、模板绑定、填报历史已一并清理）')
       setDeleteRoleTarget(null)
+      setDeleteRoleNameInput('')
     } catch (error) {
       const detail = (
         error as { response?: { data?: { detail?: string } } }
@@ -147,91 +154,171 @@ export default function RolePanel() {
     }
   }
 
-  const handleResetPassword = async (roleId: number) => {
-    try {
-      await resetPassword(roleId)
-      message.success('密码已重置为统一初始密码')
-    } catch {
-      message.error('重置密码失败')
-    }
-  }
+  const handleResetPassword = useCallback(
+    async (roleId: number) => {
+      try {
+        await resetPassword(roleId)
+        message.success('密码已重置为统一初始密码')
+      } catch {
+        message.error('重置密码失败')
+      }
+    },
+    [resetPassword, message],
+  )
 
-  const roleColumns: TableColumnsType<RoleItem> = [
-    { title: 'ID', dataIndex: 'id', width: 60 },
-    { title: '角色名称', dataIndex: 'name', width: 140 },
-    {
-      title: '所属分类',
-      render: (_, record) => {
-        if (!record.segment_name) {
-          return <Typography.Text type="secondary">未分类</Typography.Text>
-        }
-        return [record.segment_name, record.entity_name, record.department_name]
-          .filter(Boolean)
-          .join(' / ')
+  const columns: TableColumnsType<RoleItem> = useMemo(
+    () => [
+      {
+        title: 'ID',
+        dataIndex: 'id',
+        width: 70,
+        render: (v: number) => (
+          <span
+            className="ot-mono"
+            style={{ color: 'var(--ot-color-text-tertiary)' }}
+          >
+            #{v}
+          </span>
+        ),
       },
-    },
-    {
-      title: '职能',
-      dataIndex: 'function_tag_name',
-      width: 110,
-      render: (value: string | null) => (value ? <Tag color="blue">{value}</Tag> : '-'),
-    },
-    {
-      title: '默认账号',
-      width: 170,
-      render: (_, record) =>
-        `${record.default_username ?? `role_${record.id}`} / 初始密码 123456`,
-    },
-    {
-      title: '操作',
-      width: 240,
-      render: (_, record) => (
-        <Space size={0} wrap>
-          <Button type="link" size="small" onClick={() => openEditRole(record)}>
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认将账号密码重置为初始密码 123456？"
-            onConfirm={() => void handleResetPassword(record.id)}
-          >
-            <Button type="link" size="small" icon={<ThunderboltOutlined />}>
-              重置密码
+      {
+        title: '角色名称',
+        dataIndex: 'name',
+        width: 160,
+        render: (v: string) => (
+          <span style={{ fontWeight: 500 }}>{v}</span>
+        ),
+      },
+      {
+        title: '所属分类',
+        render: (_, record) => {
+          if (!record.segment_name) {
+            return (
+              <Typography.Text type="secondary">未分类</Typography.Text>
+            )
+          }
+          return (
+            <Space size={4} wrap>
+              {[record.segment_name, record.entity_name, record.department_name]
+                .filter(Boolean)
+                .map((name, i, arr) => (
+                  <span key={`${name}-${i}`} style={{ fontSize: 13 }}>
+                    {name}
+                    {i < arr.length - 1 && (
+                      <span
+                        style={{
+                          color: 'var(--ot-color-text-tertiary)',
+                          margin: '0 6px',
+                        }}
+                      >
+                        /
+                      </span>
+                    )}
+                  </span>
+                ))}
+            </Space>
+          )
+        },
+      },
+      {
+        title: '职能',
+        dataIndex: 'function_tag_name',
+        width: 110,
+        render: (value: string | null) =>
+          value ? (
+            <Tag color="blue" style={{ borderRadius: 6 }}>
+              {value}
+            </Tag>
+          ) : (
+            '-'
+          ),
+      },
+      {
+        title: '默认账号',
+        width: 200,
+        render: (_, record) => (
+          <div style={{ fontSize: 12 }}>
+            <div className="ot-mono">{record.default_username ?? `role_${record.id}`}</div>
+            <div style={{ color: 'var(--ot-color-text-tertiary)' }}>
+              初始密码 123456
+            </div>
+          </div>
+        ),
+      },
+      {
+        title: '操作',
+        width: 240,
+        render: (_, record) => (
+          <Space size={0} wrap>
+            <Button type="link" size="small" onClick={() => openEditRole(record)}>
+              编辑
             </Button>
-          </Popconfirm>
-          <Button
-            type="link"
-            danger
-            size="small"
-            icon={<DeleteOutlined />}
-            onClick={() => setDeleteRoleTarget(record)}
-          >
-            删除
-          </Button>
-        </Space>
-      ),
-    },
-  ]
+            <Popconfirm
+              title="确认将账号密码重置为初始密码 123456？"
+              onConfirm={() => void handleResetPassword(record.id)}
+            >
+              <Button
+                type="link"
+                size="small"
+                icon={<ThunderboltOutlined />}
+              >
+                重置密码
+              </Button>
+            </Popconfirm>
+            <Button
+              type="link"
+              danger
+              size="small"
+              icon={<DeleteOutlined />}
+              onClick={() => setDeleteRoleTarget(record)}
+            >
+              删除
+            </Button>
+          </Space>
+        ),
+      },
+    ],
+    [openEditRole, handleResetPassword],
+  )
 
   return (
-    <>
-      <Card title="角色管理" size="small">
-        <Space orientation="vertical" style={{ width: '100%' }} size="middle">
-          <Space style={{ marginBottom: 16 }}>
-            <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
-              新增角色
-            </Button>
-            <Typography.Text type="secondary">
-              一个部门下可创建多个角色；创建时需选择 业务板块 / 主体 / 部门 与 职能标签。
-            </Typography.Text>
-          </Space>
-          <Table
+    <div className="ot-fade-in">
+      <PageHeader
+        eyebrow="管理中心"
+        title="角色管理"
+        description="角色按「业务板块 → 主体 → 部门 + 职能标签」分类；一个部门下可创建多个角色。"
+        actions={
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={openCreateRole}
+          >
+            新增角色
+          </Button>
+        }
+      />
+
+      <Card styles={{ body: { padding: 0 } }} style={{ borderRadius: 12 }}>
+        {roles.length === 0 ? (
+          <EmptyState
+            variant="roles"
+            description="先在「组织架构」配置业务板块 / 主体 / 部门，再创建角色"
+            action={
+              <Button type="primary" icon={<PlusOutlined />} onClick={openCreateRole}>
+                新增角色
+              </Button>
+            }
+          />
+        ) : (
+          <Table<RoleItem>
             rowKey="id"
-            columns={roleColumns}
+            columns={columns}
             dataSource={roles}
             pagination={false}
-            size="small"
+            size="middle"
+            className="ot-cv-auto"
           />
-        </Space>
+        )}
       </Card>
 
       <Modal
@@ -303,28 +390,20 @@ export default function RolePanel() {
         </Form>
       </Modal>
 
-      <Modal
-        title={`删除角色「${deleteRoleTarget?.name ?? ''}」`}
+      <ConfirmDialog
         open={deleteRoleTarget !== null}
+        title={`删除角色「${deleteRoleTarget?.name ?? ''}」`}
+        okText="确认删除"
+        danger
         onCancel={() => {
           setDeleteRoleTarget(null)
           setDeleteRoleNameInput('')
         }}
-        onOk={() => {
+        onConfirm={() => {
           if (deleteRoleTarget) {
             void handleDeleteRole(deleteRoleTarget.id, deleteRoleNameInput)
           }
         }}
-        okText="确认删除"
-        okButtonProps={{
-          danger: true,
-          disabled:
-            !deleteRoleTarget ||
-            deleteRoleNameInput.trim() !== deleteRoleTarget.name,
-        }}
-        cancelText="取消"
-        destroyOnHidden
-        width={460}
       >
         <Typography.Paragraph type="danger" style={{ marginTop: 8 }}>
           此操作将级联清理以下数据，且不可恢复：
@@ -344,8 +423,15 @@ export default function RolePanel() {
           onChange={(e) => setDeleteRoleNameInput(e.target.value)}
           placeholder={deleteRoleTarget?.name}
           allowClear
+          status={
+            deleteRoleNameInput &&
+            deleteRoleTarget &&
+            deleteRoleNameInput.trim() !== deleteRoleTarget.name
+              ? 'error'
+              : ''
+          }
         />
-      </Modal>
-    </>
+      </ConfirmDialog>
+    </div>
   )
 }

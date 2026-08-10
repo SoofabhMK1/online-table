@@ -67,8 +67,7 @@ async function main() {
     r.report('解锁后保存成功', saveOk?.status === 201 || saveOk?.status === 200, `status=${saveOk?.status}`)
 
     // ---------- 内容区数字校验 ----------
-    // 解锁后立即锁回去，避免影响其它测试
-    await axios.put(`${BASE}/api/admin/periods/${lockPeriod}`, { locked: true }, { headers: ah })
+    // 保持解锁状态，测试内容区数字校验（不应被锁定拦截）
     const invalidSnap = JSON.parse(JSON.stringify(snap))
     invalidSnap.sheets.s1.cellData = { '1': { '1': { v: 'abc' } } }  // 内容区 B2 = 非数字
     const submit = await axios.post(`${BASE}/api/workspace/workbooks`,
@@ -77,6 +76,7 @@ async function main() {
     const submitMsg = typeof submit?.data?.detail === 'string' ? submit.data.detail : ''
     r.report('内容区非数字被拒(400)', submit?.status === 400 && submitMsg.includes('需为数字'), `msg=${submitMsg}`)
 
+    // 测试结束后解锁，避免影响其它测试
     await axios.put(`${BASE}/api/admin/periods/${lockPeriod}`, { locked: false }, { headers: ah })
 
     // ---------- 工作表按钮禁用 ----------
