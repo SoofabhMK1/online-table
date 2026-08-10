@@ -22,17 +22,25 @@ def _enable_sqlite_foreign_keys(dbapi_connection, _connection_record):
     cursor.close()
 
 
-def create_db_and_tables() -> None:
-    """依据 SQLModel 元数据创建所有数据表（若不存在）。"""
-    # 导入 models 模块确保其被 SQLModel.metadata 注册。
-    import app.models  # noqa: F401
+def run_alembic_upgrade() -> None:
+    """执行 alembic upgrade head 把数据库升级到最新 schema。
 
-    SQLModel.metadata.create_all(bind=engine)
-    _migrate_templates_columns()
-    _migrate_workbooks()
-    _migrate_roles_classification()
-    _migrate_role_name_uniqueness()
-    _migrate_users_default_flag()
+    取代旧的 create_all + _migrate_* 散装迁移。alembic.ini 中已把 script_location 指向 ./alembic，
+    sqlalchemy.url 通过 env.py 覆盖为 settings.DATABASE_URL。
+    """
+    from alembic import command
+    from alembic.config import Config
+
+    cfg = Config("alembic.ini")
+    cfg.set_main_option("sqlalchemy.url", settings.DATABASE_URL)
+    command.upgrade(cfg, "head")
+
+
+def create_db_and_tables() -> None:
+    """启动时把数据库升级到最新 schema（委托给 alembic）。"""
+    # 触发 SQLModel metadata 注册
+    import app.models  # noqa: F401
+    run_alembic_upgrade()
 
 
 def _migrate_templates_columns() -> None:

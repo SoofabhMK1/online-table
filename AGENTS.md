@@ -101,7 +101,9 @@ frontend/
   - `status`：`draft`(草稿) / `submitted`(已提交) / `approved`(已通过) / `rejected`(已退回)
 - **filling_periods**: `id`, `period`(unique), `locked`, `created_at` —— 管理员手动锁定/解锁某填报月
 
-> 迁移：`database._migrate_templates_columns()` 补齐标签/内容区/`content_numeric`/`archived`/`archived_at` 字段；`database._migrate_workbooks()` 补齐 `templates.year` 列，并将旧 `user_workbooks` 数据归并到 `role_workbooks`（取用户所属角色 + 当前月 period）后删除旧表；`database._migrate_roles_classification()` 为 roles 补齐分类外键列；`database._migrate_role_name_uniqueness()` 将角色名唯一性由全局改为部门内（删 `ix_roles_name`、建 `ix_roles_department_name`，均幂等）；`database._migrate_users_default_flag()` 新增 `users.is_default` 列，并对「0 个默认账号 + 仅 1 个用户」的角色回填默认账号标记（处理旧版 seed 残留）。`filling_periods`/组织架构新表由 `create_all` 自动建表。
+> 迁移：使用 **Alembic**（`backend/alembic/`）作为数据库迁移管理工具，`database.create_db_and_tables()` 在启动时调用 `alembic upgrade head` 把数据库升级到最新 schema。`backend/alembic/versions/` 目录存放各 revision；env.py 用 `SQLModel.metadata` 作 autogenerate 来源。`script.py.mako` 已预 `import sqlmodel` 防止 autogenerate 失败。SQLite 用 `render_as_batch=True` 支持 ALTER TABLE。
+
+> 旧版 `_migrate_*` 函数（`templates_columns` / `workbooks` / `roles_classification` / `role_name_uniqueness` / `users_default_flag`）已不再被 `create_db_and_tables` 调用；其语义已被初始 Alembic revision 0a3dea0e7527 涵盖。新部署直接走 alembic；老库建议先 `alembic stamp head` 再 `alembic upgrade head`（schema 已存在，跳过）。
 
 > SQLite FK 约束：每个新连接通过 `event.listens_for(engine, "connect")` 钩子执行 `PRAGMA foreign_keys=ON`（SQLite 默认 OFF）。删除角色时级联清理其模板绑定 + 填报历史（详见 `admin.delete_role`）。
 
