@@ -13,12 +13,13 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "preview": "vite preview",
-    "e2e": "node e2e.mjs && node e2e_labels.mjs && node e2e_fixes.mjs && node e2e_period.mjs && node e2e_import.mjs",
+    "e2e": "node e2e.mjs && node e2e_labels.mjs && node e2e_fixes.mjs && node e2e_period.mjs && node e2e_import.mjs && node e2e_review.mjs",
     "e2e:main": "node e2e.mjs",
     "e2e:labels": "node e2e_labels.mjs",
     "e2e:fixes": "node e2e_fixes.mjs",
     "e2e:period": "node e2e_period.mjs",
-    "e2e:import": "node e2e_import.mjs"
+    "e2e:import": "node e2e_import.mjs",
+    "e2e:review": "node e2e_review.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",

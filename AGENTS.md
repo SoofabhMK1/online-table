@@ -194,6 +194,7 @@ npm run lint       # oxlint
 - `npm run e2e:fixes` — `e2e_fixes.mjs`：保存后重进加载已存数据、退出登录跳转
 - `npm run e2e:period` — `e2e_period.mjs`：期间锁定（锁定 → 拒存 → 解锁 → 可存）+ 内容区数字校验 + 工作表级权限
 - `npm run e2e:import` — `e2e_import.mjs`：模板导入（含合并单元格 xlsx → 弹窗 → 保存）+ 导出 + 归档/恢复
+- `npm run e2e:review` — `e2e_review.mjs`：审核状态机（提交 → 退回需原因 → 修改再交 → 审核通过 → 锁定）
 
 环境变量：
 - `E2E_BASE`（默认 `http://localhost:5173`）：覆盖前端地址（CI 换端口）
