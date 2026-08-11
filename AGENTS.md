@@ -358,3 +358,10 @@ cd backend
 - 修改模板/工作簿相关字段时，同步更新：`backend/app/models.py`、`schemas.py`、`services/template_service.py` 或 `services/workbook_service.py`、对应 router、`frontend/src/api/types.ts`、相关页面与 `utils/usedRange.ts`/`utils/cellRef.ts`。
 - 前端硬编码颜色 → 改用 `constants.ts` 语义常量或 `global.css` CSS 变量。
 - 前端新增请求接口 → 优先用 `useCachedFetch`（500ms 同 key dedup）；store action 仅在需要跨页面共享或持久化时使用。
+
+antd v6 UI 测试快速提示：
+- Button 文本含中间空格（"退 回"），匹配需 `replace(/\s+/g, '')`
+- DatePicker month picker 不响应 native setter，用 keyboard ArrowUp/Down
+- InputNumber 同上，用 keyboard ArrowUp
+- Dropdown item 类名是 `.ant-dropdown-menu`（UL 元素），不是 v5 的 `.ant-dropdown-menu-item`
+- Modal 嵌套 UniverSheet 时，按钮定位用 `closest('.ant-modal-footer')` 找祖先避免 UniverSheet 工具栏干扰
