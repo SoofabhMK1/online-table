@@ -1,5 +1,6 @@
 """API smoke tests：覆盖登录 / 角色 CRUD / 模板 CRUD / 提交+审核 / 期间锁定 / 默认账号。"""
 import pytest
+from sqlmodel import Session
 
 
 def test_health(client):
@@ -105,24 +106,43 @@ def test_period_lock_round_trip(client):
     assert periods["2030-01"] is False
 
 
-def test_period_lock_blocks_workbook_save(client, normal_user, session):
-    """锁定期间，部门 save 应被 400 拦截。"""
-    # 先给 test_user 角色绑定一个模板
+def test_period_lock_blocks_workbook_save(client, normal_user, engine):
+    """锁定期间，部门 save 应被 400 拦截（端到端：用真 token 验证锁定逻辑）。
+
+    修复原缺陷版本（原版用 Bearer _ 占位，断言 401 或 400 不真正验证锁定），
+    现在通过 create_access_token 拿真 token 调用 /api/workspace/workbooks，
+    真正断言锁定拒存（400 + 中文文案）。
+    """
+    from app.models import User
+    from app.security import create_access_token
+    from sqlmodel import select
+
+    # 给 test_user 角色绑定模板
     tr = client.post(
         "/api/templates",
-        json={"name": "lock-test", "snapshot": {"sheets": {"s1": {"cellData": {}}}}},
+        json={
+            "name": "lock-test",
+            "year": 2030,
+            "snapshot": {"sheets": {"s1": {"id": "s1", "cellData": {}}}},
+        },
     )
     tid = tr.json()["id"]
-    # 用 admin client 拿角色列表 + 绑定
     roles = client.get("/api/admin/roles").json()
     test_role = next(r for r in roles if r["name"] == "测试部")
     client.post(
         f"/api/admin/roles/{test_role['id']}/templates",
         json={"template_ids": [tid]},
     )
+
     # 锁定 2030-09
-    client.put("/api/admin/periods/2030-09", json={"locked": True})
-    # 用 normal_user 视角试保存
+    r_lock = client.put("/api/admin/periods/2030-09", json={"locked": True})
+    assert r_lock.status_code == 200
+
+    # 用 normal_user 的真 token 试保存 → 应被锁定拒存 400
+    with Session(engine) as s:
+        u = s.exec(select(User).where(User.username == "test_user")).first()
+        token = create_access_token(u.id, u.role_id, u.role.name)
+
     snap = {"sheets": {"s1": {"id": "s1", "cellData": {}}}}
     r = client.post(
         "/api/workspace/workbooks",
@@ -132,11 +152,10 @@ def test_period_lock_blocks_workbook_save(client, normal_user, session):
             "snapshot": snap,
             "action": "save",
         },
-        headers={"Authorization": f"Bearer _"},  # 用真 token 测
+        headers={"Authorization": f"Bearer {token}"},
     )
-    # 测试 client 默认不带 token；本测试只验证锁定逻辑：状态 401（无 token）
-    # OR 401（已绑模板但无 token）— 真正的功能覆盖需要登录 token
-    assert r.status_code in (401, 400)  # 至少不会成功
+    assert r.status_code == 400
+    assert "锁定" in r.json()["detail"]
 
 
 def test_overview_returns_role_template_pairs(client, session):
@@ -155,11 +174,71 @@ def test_review_requires_submit_status(client, session):
     assert r.status_code == 404
 
 
-def test_review_rejected_requires_reason(client, session):
-    """创建角色 + 模板 + 提交 + 尝试 reject 不带 reason。"""
-    # 流程较长，仅断言接口契约
-    # 完整 happy path 留给 e2e
-    pass
+def test_review_rejected_requires_reason(client, engine):
+    """创建角色 + 模板 + 填报 + 提交 + 尝试 reject 不带 reason → 400。
+
+    修复原缺陷版本（原版是空 pass），现在端到端验证：
+    1. 审核已 submitted 的工作簿
+    2. reject 不带 reject_reason → 400
+    3. reject 仅空白 reject_reason → 400
+    4. reject 带合理原因 → 200
+    """
+    from sqlmodel import Session, select
+
+    from app.models import RoleWorkbook
+
+    # 创建模板 + 角色 + 绑定
+    tpl = client.post(
+        "/api/templates",
+        json={"name": "rev-test", "year": 2030, "snapshot": {"sheets": {}}},
+    ).json()
+    role = client.post("/api/admin/roles", json={"name": "rev-部门"}).json()
+    client.post(
+        f"/api/admin/roles/{role['id']}/templates",
+        json={"template_ids": [tpl["id"]]},
+    )
+
+    # 直接插入一条 submitted 工作簿（admin 视角造数据）
+    with Session(engine) as s:
+        s.add(RoleWorkbook(
+            role_id=role["id"],
+            template_id=tpl["id"],
+            period="2030-09",
+            snapshot={"v": 1},
+            status="submitted",
+        ))
+        s.commit()
+
+    # 1. reject 不带 reason → 400
+    r = client.post(
+        f"/api/admin/workbooks/{role['id']}/{tpl['id']}/2030-09/review",
+        json={"action": "rejected"},
+    )
+    assert r.status_code == 400
+
+    # 2. reject 仅空白 → 400
+    r = client.post(
+        f"/api/admin/workbooks/{role['id']}/{tpl['id']}/2030-09/review",
+        json={"action": "rejected", "reject_reason": "   "},
+    )
+    assert r.status_code == 400
+
+    # 3. reject 带合理原因 → 200 + status=rejected + 原因写入
+    r = client.post(
+        f"/api/admin/workbooks/{role['id']}/{tpl['id']}/2030-09/review",
+        json={"action": "rejected", "reject_reason": "预算金额需重核"},
+    )
+    assert r.status_code == 200
+    assert r.json()["status"] == "rejected"
+
+    # 持久化校验
+    with Session(engine) as s:
+        wb = s.exec(select(RoleWorkbook).where(
+            RoleWorkbook.role_id == role["id"],
+            RoleWorkbook.template_id == tpl["id"],
+        )).first()
+        assert wb.status == "rejected"
+        assert wb.reject_reason == "预算金额需重核"
 
 
 def test_admin_role_name_rejected(client):

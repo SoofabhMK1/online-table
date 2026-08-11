@@ -109,14 +109,28 @@ class _StubUser:
 
 def _install_overrides(engine, admin_user, normal_user):
     def _override_session():
-        with Session(engine) as s:
-            yield s
+        # expire_on_commit=False 让 commit 后属性不失效；session 关闭后通过
+        # expunge_all() 显式解除 ORM 对象与 session 的关联，避免下次新 session
+        # add 同一对象时触发 "already attached" 报错（SQLAlchemy 2.x 默认行为）。
+        with Session(engine, expire_on_commit=False) as s:
+            try:
+                yield s
+            finally:
+                s.expunge_all()
 
     def _override_admin():
-        return _StubUser(admin_user)
+        # 每次依赖调用都从 fresh session 加载并立刻 expunge，返回 detached 副本，
+        # 避免被路由内 session.add() 时触发 "already attached to session" 错误。
+        with Session(engine) as fresh:
+            u = fresh.get(User, admin_user.id)
+            fresh.expunge(u)
+            return _StubUser(u)
 
     def _override_normal():
-        return _StubUser(normal_user)
+        with Session(engine) as fresh:
+            u = fresh.get(User, normal_user.id)
+            fresh.expunge(u)
+            return _StubUser(u)
 
     app.dependency_overrides[get_session] = _override_session
     app.dependency_overrides[get_current_admin] = _override_admin
