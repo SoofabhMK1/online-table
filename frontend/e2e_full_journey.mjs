@@ -144,15 +144,7 @@ async function main() {
     r.report('admin 进入 /admin/periods', true)
 
     // 改年份到当前年
-    await page.evaluate((y) => {
-      const inp = document.querySelector('.ant-input-number-input')
-      inp.focus()
-      const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-      setter.call(inp, String(y))
-      inp.dispatchEvent(new Event('input', { bubbles: true }))
-      inp.dispatchEvent(new Event('change', { bubbles: true }))
-      inp.dispatchEvent(new Event('blur', { bubbles: true }))
-    }, year)
+    await r.setInputNumber(page, '.ant-input-number-input', year)
     await sleep(1000)
 
     // 点击 nextMonth 行的 Switch 锁定

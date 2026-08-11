@@ -720,8 +720,6 @@ class TestPeriodFormatValidation:
             assert r.status_code in (400, 422), f"period={bad} 应 4xx，实际 {r.status_code}"
 
     def test_lock_invalid_period_422(self, client):
-        """path 段无效格式 → 4xx（后端 path 未硬性校验，但实际月份超界应报错）。"""
+        """path 段无效格式 → 422（见 IMP-04：PUT /periods/{period} path 已加 PERIOD_PATTERN）。"""
         r = client.put("/api/admin/periods/2030-13", json={"locked": True})
-        # 13 月虽无效但 path 未 schema 校验，可能 200
-        # 接受 200/4xx 两种结果（仅记录，不严格断言）
-        assert r.status_code in (200, 400, 422)
+        assert r.status_code == 422, f"实际 {r.status_code}"

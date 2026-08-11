@@ -71,9 +71,9 @@ async function main() {
     r.report('点击退出登录跳转 /login', afterLogout === '/login', `path=${afterLogout}`)
   } finally {
     await browser.close()
-    // 清理本脚本创建的模板
+    // 清理本脚本创建的模板（archive 替代 DELETE：保留绑定 + 历史）
     try {
-      await axios.delete(`${BASE}/api/templates/${tid}`, { headers: ah }).catch(() => {})
+      await axios.post(`${BASE}/api/templates/${tid}/archive`, {}, { headers: ah }).catch(() => {})
     } catch { /* ignore */ }
   }
 

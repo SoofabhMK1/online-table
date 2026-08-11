@@ -90,6 +90,74 @@ export class Reporter {
     )
     if (!clicked) throw new Error(`未找到按钮/元素: ${text}`)
   }
+  /**
+   * 设置 antd InputNumber（受控 rc-input-number）到目标数值。
+   * IMP-07：直接用 native setter 改 DOM value 不会触发 onChange，必须模拟真实键盘事件。
+   * 流程：focus → 全选 → 删除 → keyboard.type（每个字符触发 keydown/input 事件）。
+   */
+  async setInputNumber(page, selector, value) {
+    await page.waitForSelector(selector, { timeout: 10000 })
+    await page.focus(selector)
+    await page.click(selector, { clickCount: 3 })
+    await page.keyboard.press('Backspace')
+    await page.keyboard.type(String(value))
+    await page.keyboard.press('Tab')
+    await sleep(300)
+  }
+  /**
+   * 设置 antd DatePicker picker="month" 到目标 YYYY-MM（受控组件）。
+   * IMP-06：native setter + dispatch input 事件不触发 antd Picker 的 onChange。
+   * 策略：点击 input 打开弹层 → 找「年份切换按钮」调整年 → 找月份 cell-inner 点击。
+   */
+  async selectMonth(page, period) {
+    const [y, m] = period.split('-').map(Number)
+    await page.click('.ant-picker-input')
+    await page.waitForSelector('.ant-picker-dropdown', { timeout: 5000 })
+    await sleep(300)
+    // 1) 切年份：点 .ant-picker-year-btn，弹层切到 year-select，点目标年
+    const yearClicked = await page.evaluate((targetY) => {
+      const yearBtn = document.querySelector('.ant-picker-dropdown .ant-picker-year-btn')
+      if (!yearBtn) return { ok: false, reason: 'no year-btn' }
+      yearBtn.click()
+      return { ok: true }
+    }, y)
+    if (!yearClicked.ok) throw new Error(`selectMonth: ${yearClicked.reason}`)
+    await sleep(400)
+    await page.waitForSelector('.ant-picker-dropdown .ant-picker-cell-inner', { timeout: 5000 })
+    const yearSelected = await page.evaluate((targetY) => {
+      const cells = Array.from(
+        document.querySelectorAll('.ant-picker-dropdown .ant-picker-cell-inner'),
+      )
+      const cell = cells.find((c) => c.textContent?.trim() === String(targetY))
+      if (cell) {
+        cell.click()
+        return { ok: true }
+      }
+      return { ok: false, reason: 'year cell not found', samples: cells.slice(0, 5).map((c) => c.textContent?.trim()) }
+    }, y)
+    if (!yearSelected.ok) throw new Error(`selectMonth: ${yearSelected.reason} ${JSON.stringify(yearSelected.samples ?? '')}`)
+    await sleep(400)
+    // 2) 切月份：弹层回到 month panel，点目标月
+    await page.waitForSelector('.ant-picker-dropdown .ant-picker-cell-inner', { timeout: 5000 })
+    const monthSelected = await page.evaluate((targetM) => {
+      const monthNames = [
+        '一月', '二月', '三月', '四月', '五月', '六月',
+        '七月', '八月', '九月', '十月', '十一月', '十二月',
+      ]
+      const label = `${monthNames[targetM - 1]}`
+      const cells = Array.from(
+        document.querySelectorAll('.ant-picker-dropdown .ant-picker-cell-inner'),
+      )
+      const cell = cells.find((c) => c.textContent?.trim() === label)
+      if (cell) {
+        cell.click()
+        return { ok: true }
+      }
+      return { ok: false, reason: 'month cell not found', label, samples: cells.slice(0, 5).map((c) => c.textContent?.trim()) }
+    }, m)
+    if (!monthSelected.ok) throw new Error(`selectMonth: ${monthSelected.reason} ${JSON.stringify(monthSelected.samples ?? '')}`)
+    await sleep(500)
+  }
   /** 启动 puppeteer；HEADLESS 由环境变量决定。 */
   async launchBrowser() {
     return puppeteer.launch({

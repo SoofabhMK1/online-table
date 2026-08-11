@@ -1,6 +1,7 @@
 from datetime import datetime
+from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Depends, HTTPException, Path, Query, status
 from sqlmodel import Session, select
 
 from app.config import settings
@@ -739,7 +740,7 @@ async def list_periods(
 
 @router.put("/periods/{period}", response_model=FillingPeriodRead)
 async def upsert_period_lock(
-    period: str,
+    period: Annotated[str, Path(pattern=PERIOD_PATTERN)],
     body: FillingPeriodUpsert,
     session: Session = Depends(get_session),
 ) -> FillingPeriodRead:

@@ -114,12 +114,13 @@ class TestUpsertPeriodLock:
         assert periods["2099-06"] is False
 
     def test_invalid_period_format_returns_422(self, client):
-        """非 YYYY-MM 格式应 422（路径段格式校验）。"""
-        r = client.put("/api/admin/periods/2099-13", json={"locked": True})
-        # FastAPI path 不强制 pattern，月份校验在 router 中没有 — 但 schema PERIOD_PATTERN 在 body 里
-        # 这里 PUT 路径段是 string，schema 仅校验 body。月份超界仍 200。
-        # 这是当前实现的容差行为，记录但不视为 bug。
-        assert r.status_code in (200, 422)
+        """非 YYYY-MM 格式应 422（路径段格式校验，见 IMP-04）。
+
+        注：「2099/01」含斜杠 → 路径不匹配走 404（非本测试关注）。
+        """
+        for bad in ("2099-13", "2099-00", "abcd-ef", "2099"):
+            r = client.put(f"/api/admin/periods/{bad}", json={"locked": True})
+            assert r.status_code == 422, f"period={bad} 应 422，实际 {r.status_code}"
 
 
 class TestWorkspaceLockBlocksSave:

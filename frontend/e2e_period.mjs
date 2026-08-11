@@ -97,10 +97,10 @@ async function main() {
     r.report('工作表「+」按钮被禁用', !addSheetBtn)
   } finally {
     if (browser) await browser.close()
-    // 清理：解锁 + 删模板（连带 role_template_mapping）
+    // 清理：解锁 + 归档模板（保留绑定 + 历史）
     try {
       await axios.put(`${BASE}/api/admin/periods/${lockPeriod}`, { locked: false }, { headers: ah }).catch(() => {})
-      await axios.delete(`${BASE}/api/templates/${tid}`, { headers: ah }).catch(() => {})
+      await axios.post(`${BASE}/api/templates/${tid}/archive`, {}, { headers: ah }).catch(() => {})
     } catch { /* ignore */ }
   }
 

@@ -23,7 +23,12 @@ async function main() {
     await r.gotoWithRetry(page, `${BASE}/admin/templates`, '.ant-menu')
     r.report('管理端登录并进入 /admin/templates', true)
 
-    await page.click('.ant-btn-primary')
+    await page.evaluate(() => {
+      const btn = Array.from(document.querySelectorAll('button')).find(
+        (b) => b.textContent?.trim() === '新建模板',
+      )
+      btn?.click()
+    })
     await r.waitCanvas(page, CREATE_MODAL, 15000)
     const modalCanvas = await page.evaluate(
       (sel) => document.querySelector(sel)?.querySelectorAll('canvas').length ?? 0,
@@ -128,12 +133,16 @@ async function main() {
     }
     r.report('无未捕获 JS 异常', pageErrors.length === 0, `errors=${pageErrors.length}`)
   } finally {
-    // 清理本脚本创建的模板（同时清理 role_template_mapping 行）
+    // 清理本脚本创建的模板（archive 替代 DELETE：保留绑定 + 历史，但本脚本不依赖）
     try {
       const tplList = (await axios.get(`${BASE}/api/templates`, { headers: ah })).data
       const t = tplList.find((x) => x.name === templateName)
       if (t) {
-        await axios.delete(`${BASE}/api/templates/${t.id}`, { headers: ah }).catch(() => {})
+        await axios.post(
+          `${BASE}/api/templates/${t.id}/archive`,
+          {},
+          { headers: ah },
+        ).catch(() => {})
       }
     } catch { /* ignore */ }
     await browser.close()

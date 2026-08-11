@@ -148,7 +148,7 @@ async function main() {
       const tplList = (await axios.get(`${BASE}/api/templates`, { headers: ah })).data
       const t = tplList.find((x) => x.name === tplName)
       if (t) {
-        await axios.delete(`${BASE}/api/templates/${t.id}`, { headers: ah }).catch(() => {})
+        await axios.post(`${BASE}/api/templates/${t.id}/archive`, {}, { headers: ah }).catch(() => {})
       }
     } catch { /* ignore */ }
   } finally {

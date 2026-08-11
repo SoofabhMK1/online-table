@@ -24,15 +24,7 @@ async function main() {
 
     // 改年份（用未来年份确保 12 月都未配置）
     await sleep(500)
-    await page.evaluate((y) => {
-      const inputs = document.querySelectorAll('.ant-input-number-input')
-      if (inputs.length > 0) {
-        const setter = Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype, 'value').set
-        setter.call(inputs[0], String(y))
-        inputs[0].dispatchEvent(new Event('input', { bubbles: true }))
-        inputs[0].dispatchEvent(new Event('blur', { bubbles: true }))
-      }
-    }, year)
+    await r.setInputNumber(page, '.ant-input-number-input', year)
     await sleep(1500)
 
     // 验证 12 月都展示
@@ -135,6 +127,15 @@ async function main() {
     if (pageErrors.length > 0) console.log('JS 错误:', pageErrors)
     r.report('无未捕获 JS 异常', pageErrors.length === 0)
   } finally {
+    // 兜底清理本脚本创建/锁定的模板与周期
+    try {
+      const tpls = (await axios.get(`${BASE}/api/templates`, { headers: ah })).data
+      for (const t of tpls) {
+        if (t.name.startsWith('PER测试模板')) {
+          await axios.post(`${BASE}/api/templates/${t.id}/archive`, {}, { headers: ah }).catch(() => {})
+        }
+      }
+    } catch {}
     await browser.close()
   }
 

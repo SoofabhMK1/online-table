@@ -111,9 +111,9 @@ async function main() {
       `A1=${JSON.stringify(a1After)} hackFound=${hackFound}`,
     )
   } finally {
-    // 清理：删模板（连带 role_template_mapping）+ 删本脚本创建的角色
+    // 清理：归档模板（保留绑定 + 历史）+ 删本脚本创建的角色
     try {
-      await axios.delete(`${BASE}/api/templates/${tid}`, { headers: ah }).catch(() => {})
+      await axios.post(`${BASE}/api/templates/${tid}/archive`, {}, { headers: ah }).catch(() => {})
       await axios.delete(`${BASE}/api/admin/roles/${finRoleId}`, { headers: ah, data: { confirm_name: roleName } }).catch(() => {})
     } catch { /* ignore */ }
     if (browser) await browser.close()
