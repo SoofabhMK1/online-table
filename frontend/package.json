@@ -13,13 +13,20 @@
     "lint": "oxlint",
     "lint:fix": "oxlint --fix",
     "preview": "vite preview",
-    "e2e": "node e2e.mjs && node e2e_labels.mjs && node e2e_fixes.mjs && node e2e_period.mjs && node e2e_import.mjs && node e2e_review.mjs",
+    "e2e": "node e2e.mjs && node e2e_labels.mjs && node e2e_fixes.mjs && node e2e_period.mjs && node e2e_import.mjs && node e2e_review.mjs && node e2e_org.mjs && node e2e_role_mgmt.mjs && node e2e_periods_ui.mjs && node e2e_change_password.mjs && node e2e_duplicate.mjs && node e2e_archived_binding.mjs && node e2e_full_journey.mjs",
     "e2e:main": "node e2e.mjs",
     "e2e:labels": "node e2e_labels.mjs",
     "e2e:fixes": "node e2e_fixes.mjs",
     "e2e:period": "node e2e_period.mjs",
     "e2e:import": "node e2e_import.mjs",
-    "e2e:review": "node e2e_review.mjs"
+    "e2e:review": "node e2e_review.mjs",
+    "e2e:org": "node e2e_org.mjs",
+    "e2e:role-mgmt": "node e2e_role_mgmt.mjs",
+    "e2e:periods-ui": "node e2e_periods_ui.mjs",
+    "e2e:change-password": "node e2e_change_password.mjs",
+    "e2e:duplicate": "node e2e_duplicate.mjs",
+    "e2e:archived-binding": "node e2e_archived_binding.mjs",
+    "e2e:full-journey": "node e2e_full_journey.mjs"
   },
   "dependencies": {
     "@ant-design/icons": "^6.3.2",
